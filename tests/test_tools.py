@@ -106,7 +106,10 @@ def test_a_road_ending_where_it_started_is_split_into_a_loop(ctx):
     assert isinstance(command, Composite)
     assert len(ctx.network.nodes) == 3
     assert len(ctx.network.segments) == 3
-    assert any(s.node_a == node.id or s.node_b == node.id for s in ctx.network.segments.values())
+    assert any(
+        s.node_a == node.id or s.node_b == node.id
+        for s in ctx.network.segments.values()
+    )
 
     degenerate = draw(ctx, [node.position, node.position], snap, snap)
     assert isinstance(degenerate, str)
@@ -124,7 +127,9 @@ def test_both_ends_on_one_road_is_refused_rather_than_corrupting_it(ctx):
     a, b = road.path.length * 0.3, road.path.length * 0.7
     first = Snap(SnapKind.SEGMENT, road.path.sample(a).position, (road.id, a))
     second = Snap(SnapKind.SEGMENT, road.path.sample(b).position, (road.id, b))
-    result = draw(ctx, [first.position, Vec2(0.0, 40.0), second.position], first, second)
+    result = draw(
+        ctx, [first.position, Vec2(0.0, 40.0), second.position], first, second
+    )
     assert "same road" in result
     assert road.id in ctx.network.segments
 
@@ -143,6 +148,7 @@ def test_preview_reports_the_real_road_length(ctx):
     preview = tool.preview(ctx)
 
     assert len(preview.paths) == 1
+    assert preview.profile is ctx.profile
     assert preview.measurement is not None
     assert approx(preview.measurement, 40.0)
 

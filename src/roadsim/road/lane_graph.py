@@ -36,7 +36,9 @@ class LaneGraph:
         return tuple(out)
 
 
-def build_lane_graph(segments: list[tuple[int, int, tuple[LaneSpec, ...]]]) -> LaneGraph:
+def build_lane_graph(
+    segments: list[tuple[int, int, tuple[LaneSpec, ...]]],
+) -> LaneGraph:
     """Build one travel path for every drivable lane on each segment.
 
     A lane marked `Direction.BOTH` contributes both directions, while a lane that
@@ -74,9 +76,13 @@ def _lane_directions(direction: Direction) -> tuple[Direction, ...]:
     return ()
 
 
-def _start_end(segment_id: int, node_a: int, node_b: int, direction: Direction) -> tuple[int, int]:
+def _start_end(
+    segment_id: int, node_a: int, node_b: int, direction: Direction
+) -> tuple[int, int]:
     if direction is Direction.FORWARD:
         return node_a, node_b
     if direction is Direction.BACKWARD:
         return node_b, node_a
-    raise ValueError(f"segment {segment_id} lane direction must be traffic, not {direction!r}")
+    raise ValueError(
+        f"segment {segment_id} lane direction must be traffic, not {direction!r}"
+    )

@@ -7,7 +7,7 @@ feel; the geometry stays this repo's own.
 **Prerequisite:** M2 (done). Read `CLAUDE.md` and `docs/decisions.md` first -
 D1-D8 constrain most of what follows, and this milestone adds D9-D13.
 
-**Why before traffic:** every item below is a *model or editor* question. Putting
+**Why before traffic:** every item below is a _model or editor_ question. Putting
 textures in front of them would mean texturing geometry that is about to change,
 and putting vehicles in front would mean driving them over roads that cannot yet
 cross each other.
@@ -19,28 +19,28 @@ cross each other.
 Things that do not work, in the user's words, turned into the list this milestone
 answers:
 
-| # | What is wrong today | Where |
-|---|---|---|
-| 1 | A road drawn back to its own start is **refused** - no loops, so no roundabouts | `build_road_command` |
-| 2 | The interface "feels more like a terminal app than a game UI" | `render/hud.py` was the whole of it |
-| 3 | One editor, no modes - no way to look without touching | `scenes/editor.py` |
-| 4 | No bulldozer, so no way to see what a delete will take before it takes it | - |
-| 5 | One drawing behaviour, not CS2's straight / curve / complex / continuous, and no replace | `tools/draw_road.py` |
-| 6 | A road preview is a one-pixel centreline, not a road | `ToolPreview.paths` |
-| 7 | A curve gives no construction lines while you place it | - |
-| 8 | Dead ends are square - no turning head, no terminal | - |
-| 9 | No alignment guides near other roads | - |
-| 10 | No collision detection: extreme shapes and self-overlap both pass | - |
-| 11 | No live measurements - length, angle, what you are connecting to | - |
-| 12 | Snapping is centre-only, so different lane counts always centre-align | `editor/snapping.py` |
-| 13 | Two roads crossing without a shared node **do not form a junction** | nothing detects crossings |
-| 14 | No height, so no bridges or overpasses | - |
-| 15 | Junctions have no pavement and square corners | `road/junction.py` |
-| 16 | "Panning not working" | `app.py` |
+| #   | What is wrong today                                                                      | Where                               |
+| --- | ---------------------------------------------------------------------------------------- | ----------------------------------- |
+| 1   | A road drawn back to its own start is **refused** - no loops, so no roundabouts          | `build_road_command`                |
+| 2   | The interface "feels more like a terminal app than a game UI"                            | `render/hud.py` was the whole of it |
+| 3   | One editor, no modes - no way to look without touching                                   | `scenes/editor.py`                  |
+| 4   | No bulldozer, so no way to see what a delete will take before it takes it                | -                                   |
+| 5   | One drawing behaviour, not CS2's straight / curve / complex / continuous, and no replace | `tools/draw_road.py`                |
+| 6   | A road preview is a one-pixel centreline, not a road                                     | `ToolPreview.paths`                 |
+| 7   | A curve gives no construction lines while you place it                                   | -                                   |
+| 8   | Dead ends are square - no turning head, no terminal                                      | -                                   |
+| 9   | No alignment guides near other roads                                                     | -                                   |
+| 10  | No collision detection: extreme shapes and self-overlap both pass                        | -                                   |
+| 11  | No live measurements - length, angle, what you are connecting to                         | -                                   |
+| 12  | Snapping is centre-only, so different lane counts always centre-align                    | `editor/snapping.py`                |
+| 13  | Two roads crossing without a shared node **do not form a junction**                      | nothing detects crossings           |
+| 14  | No height, so no bridges or overpasses                                                   | -                                   |
+| 15  | Junctions have no pavement and square corners                                            | `road/junction.py`                  |
+| 16  | "Panning not working"                                                                    | `app.py`                            |
 
 Plus the two debts `CLAUDE.md` already recorded against M2 - exact curve-curve
 junction intersection instead of the straight-ray approximation and its trim cap,
-and splitting a road where a new one *crosses* it. They are not separate errands:
+and splitting a road where a new one _crosses_ it. They are not separate errands:
 they are the foundation under 10, 13 and 15.
 
 ---
@@ -64,11 +64,11 @@ numbered entry in `docs/decisions.md` as it lands.
    and coloured through `render/lane_style.py` - the only place lane colours live.
 5. **Modes are runtime-switchable over one shared `EditorContext`** (D11).
    `--scene debug` and `--scene network` keep working untouched.
-6. **Pan is WASD + arrows + screen edge + middle-drag.** Deliberately *not*
+6. **Pan is WASD + arrows + screen edge + middle-drag.** Deliberately _not_
    right-drag: that keeps right-click free as a tool action, so no press-versus-drag
    disambiguation is needed anywhere.
 7. **A junction corner handle slides along each arm** (D13). Its distance from the
-   junction sets *both* the corner radius and how far that arm is pushed back.
+   junction sets _both_ the corner radius and how far that arm is pushed back.
    Stored per segment end (`pull_a` / `pull_b`, `None` meaning derive it) because
    it is user intent - the same reasoning D5 reserves for M4's lane connections.
 8. **Every junction corner is rounded, with the radius clamped by the corner
@@ -113,7 +113,7 @@ Three, all verified in the code, all fixed in step 1.
 **D-1. Lane ribbons invert in tight curves - the pavement artifact.**
 `build_ribbon` displaces the centre frame sideways (`geometry/ribbon.py`); it does
 not call `arc.offset`. When a lateral offset exceeds the arc radius on the inside
-of a curve, that edge folds *through* the arc centre and the outline self-crosses -
+of a curve, that edge folds _through_ the arc centre and the outline self-crosses -
 and `pygame.draw.polygon` renders a self-crossing outline as holes and bowties.
 Sidewalks carry the largest offsets (`asymmetric_boulevard` reaches 8.25 m), so
 they fold first. The same curve raises `DegenerateOffsetError` on the exact
@@ -132,7 +132,7 @@ mirroring twice strips it again, so a flip-and-flip-back round trip stays
 byte-identical.
 
 **D-3. Panning: a stuck-state defect and a bindings gap.** `Camera.pan_pixels` was
-correct and covered; `_panning` was only cleared by a `MOUSEBUTTONUP` *inside* the
+correct and covered; `_panning` was only cleared by a `MOUSEBUTTONUP` _inside_ the
 window, so releasing off-window or alt-tabbing mid-drag panned forever on the next
 mouse move. And middle-drag was the only binding, which on a trackpad reads as
 panning being broken outright.
@@ -161,7 +161,7 @@ corner_fillet(corner, into, out_of, radius, room_in, room_out) -> Fillet | None
 signed_area / is_ccw / contains
 ```
 
-Two traps, both of which produce a *plausible junction in the wrong place* rather
+Two traps, both of which produce a _plausible junction in the wrong place_ rather
 than an error, so both have their own tests:
 
 - **Containment goes through `ArcSegment.s_at_angle`, never `project`.** `project`
@@ -192,7 +192,7 @@ Everything else is derived and rebuilt with dirty nodes (D10) - colliders,
 crossings, the spatial index, junction corners, pavements, caps, trims, paths. A
 stored collider is exactly the stale-derived-geometry failure D5 forbids: every
 node drag, profile change and split would have to remember to invalidate it, and
-one miss is a network that collides wrongly *and saves to disk*. "A collider at
+one miss is a network that collides wrongly _and saves to disk_. "A collider at
 build time" therefore means rebuild time.
 
 ```python
@@ -231,7 +231,7 @@ Notes that will save an afternoon:
 
 ### `editor/` - shapers, and a preview that is still data
 
-A shaper owns its own *click grammar* - straight is two clicks, curve is three,
+A shaper owns its own _click grammar_ - straight is two clicks, curve is three,
 freeform is a drag, continuous is an open chain. Leaving the grammar in
 `DrawRoadTool` is precisely the `if`-tree rule 2 forbids, so:
 
@@ -302,7 +302,7 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 
 - **intersect** - a hit's point agrees from both parameterisations; symmetry under
   argument swap; a tangent yields exactly one hit at radius distance; an arc whose
-  *extension* would cross reports nothing (the `project`-clamping trap); a join hit
+  _extension_ would cross reports nothing (the `project`-clamping trap); a join hit
   appears once; a figure-eight self-intersects exactly once, a monotone road not at
   all, and a closed loop meeting only at its own corner not at all either.
 - **aabb** - a path box contains 10 000 samples **and** is tight to 1e-9; an arc
@@ -312,7 +312,7 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 - **camera input** - a drag moves the centre exactly `(-dx/zoom, +dy/zoom)`; held
   keys move exactly `speed * dt`; a diagonal is not 1.41x faster; pan speed is
   constant on screen at any zoom; focus loss mid-drag stops the pan.
-- **ui** - swatch stripes are proportional and sum *exactly* to the rect; each bar
+- **ui** - swatch stripes are proportional and sum _exactly_ to the rect; each bar
   has one button per registry entry; the wheel over chrome never reaches the camera.
 - **modes** - switching preserves network identity, history depth and the payload;
   view mode clicks inspect and never mutate; leaving mid-road abandons the road and
@@ -323,7 +323,7 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 - **spatial** - `candidates` is a **superset** of a brute-force scan (an invariant
   that survives a rewrite to a BVH; asserting bucket contents would not).
 - **validate** - asserts `Violation.code`, never prose: a hairpin under the widest
-  preset's half-width, a self-crossing freehand, a road whose *edges* cross though
+  preset's half-width, a self-crossing freehand, a road whose _edges_ cross though
   its centreline does not, and a near-parallel overlap at the same level - all
   refused; the same road one level up accepted.
 - **junction** - every M2 assertion intact, especially the asymmetric
@@ -340,14 +340,14 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 
 ## Deferred, deliberately
 
-- Pedestrian **crossings** across junction mouths - M4. Pavement *continuity* is in.
+- Pedestrian **crossings** across junction mouths - M4. Pavement _continuity_ is in.
 - **Lane-to-lane connectivity** - M4; D5 reserves it. Anchors stay an alignment aid.
 - **Level transitions along a segment.** A ramp is two nodes at different levels,
   drawn but not smoothed or banked.
 - **Bridge presentation** - pillars, shadows, elevation shading. One cue only: paint
   order by level, and the level in the readout.
 - **Handle-editing a placed road's shape** by dragging its control points. Freehand
-  already covers freeform *drawing*; editing a placed shape is its own milestone.
+  already covers freeform _drawing_; editing a placed shape is its own milestone.
 - **Moving `Snapper` onto `SpatialIndex`.** Build the index for crossings; leave the
   snapper alone. A faster snapper that snaps differently is a regression.
 

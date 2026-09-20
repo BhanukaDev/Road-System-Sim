@@ -11,8 +11,10 @@ from __future__ import annotations
 import pygame
 
 from .. import config
+from ..geometry import build_ribbon
 from ..render.camera import Camera
 from ..render.curves import to_screen_points
+from ..render.lane_style import LAYERS, style_for
 from ..road.network import RoadNetwork
 from .context import Selection, ToolPreview
 from .snapping import Snap, SnapKind
@@ -61,12 +63,14 @@ class EditorOverlay:
         """
         for node in network.nodes.values():
             selected = node.id == selection.node
-            color = (
-                config.Color.NODE_SELECTED if selected else config.Color.NODE_MARK
-            )
+            color = config.Color.NODE_SELECTED if selected else config.Color.NODE_MARK
             radius = 6 if node.degree > 2 else 4
             pygame.draw.circle(
-                surface, color, camera.to_screen(node.position), radius, 0 if selected else 2
+                surface,
+                color,
+                camera.to_screen(node.position),
+                radius,
+                0 if selected else 2,
             )
 
     def _draw_control_points(
@@ -100,6 +104,11 @@ class EditorOverlay:
     ) -> None:
         color = config.Color.SEGMENT_ERROR if preview.invalid else config.Color.PREVIEW
 
+        if preview.profile is not None and not preview.invalid:
+            for layer in LAYERS:
+                for path in preview.paths:
+                    self._draw_preview_lanes(surface, camera, path, preview.profile, layer)
+
         for path in preview.paths:
             points = to_screen_points(camera, path.points(camera.world_tolerance))
             if len(points) >= 2:
@@ -132,6 +141,23 @@ class EditorOverlay:
         if preview.snap is not None:
             self._draw_snap(surface, camera, preview.snap)
 
+    def _draw_preview_lanes(self, surface, camera, path, profile, layer) -> None:
+        for index, lane in enumerate(profile.lanes):
+            style = style_for(lane.type)
+            if style.layer != layer:
+                continue
+            ribbon = build_ribbon(
+                path,
+                *profile.lane_bounds(index),
+                camera.world_tolerance,
+            )
+            outline = to_screen_points(camera, ribbon.outline)
+            if len(outline) < 3:
+                continue
+            pygame.draw.polygon(surface, style.fill, outline)
+            if style.edge is not None:
+                pygame.draw.polygon(surface, style.edge, outline, 1)
+
     def _draw_snap(self, surface: pygame.Surface, camera: Camera, snap: Snap) -> None:
         """Each snap kind gets its own mark, so what the editor is about to do
         is readable before the click rather than after it."""
@@ -148,13 +174,17 @@ class EditorOverlay:
             _plus(surface, color, center, 6)
 
 
-def _cross(surface: pygame.Surface, color, center: tuple[float, float], r: float) -> None:
+def _cross(
+    surface: pygame.Surface, color, center: tuple[float, float], r: float
+) -> None:
     x, y = center
     pygame.draw.line(surface, color, (x - r, y - r), (x + r, y + r), 2)
     pygame.draw.line(surface, color, (x - r, y + r), (x + r, y - r), 2)
 
 
-def _plus(surface: pygame.Surface, color, center: tuple[float, float], r: float) -> None:
+def _plus(
+    surface: pygame.Surface, color, center: tuple[float, float], r: float
+) -> None:
     x, y = center
     pygame.draw.line(surface, color, (x - r, y), (x + r, y), 1)
     pygame.draw.line(surface, color, (x, y - r), (x, y + r), 1)

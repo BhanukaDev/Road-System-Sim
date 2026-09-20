@@ -58,6 +58,8 @@ class ToolPreview:
     """The preview cannot be committed as it stands - drawn as a warning."""
     measurement: float | None = None
     angle: float | None = None
+    profile: RoadProfile | None = None
+    """Cross-section to use when drawing the preview roads."""
 
     @property
     def is_empty(self) -> bool:

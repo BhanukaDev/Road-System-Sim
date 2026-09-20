@@ -15,7 +15,14 @@ import pygame
 
 from ... import config
 from ...geometry import Path, Vec2, fit_freehand, fit_polyline
-from ..commands import AddSegment, Command, Composite, CreateNode, NodeSlot, SplitSegment
+from ..commands import (
+    AddSegment,
+    Command,
+    Composite,
+    CreateNode,
+    NodeSlot,
+    SplitSegment,
+)
 from ..context import EditorContext, ToolPreview
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
@@ -162,6 +169,7 @@ class DrawRoadTool(Tool):
     def preview(self, ctx: EditorContext) -> ToolPreview:
         preview = ToolPreview(
             points=list(self.points),
+            profile=ctx.profile,
             snap=ctx.snapper.snap(ctx.cursor),
             invalid=bool(self._blocked),
         )
@@ -258,7 +266,10 @@ def _loop_too_short(points: list[Vec2]) -> bool:
         return True
     loop = points[:-1] if points[0].distance_to(points[-1]) <= 1e-9 else points
     try:
-        return fit_polyline(loop, config.DEFAULT_CORNER_RADIUS).length < config.MIN_ROAD_LENGTH
+        return (
+            fit_polyline(loop, config.DEFAULT_CORNER_RADIUS).length
+            < config.MIN_ROAD_LENGTH
+        )
     except ValueError:
         return True
 
@@ -285,9 +296,7 @@ def _corner_points(path: Path, start: Vec2, end: Vec2) -> list[Vec2]:
         entry, exit_ = piece.start, piece.end
         # Where the entry and exit tangents cross is the corner this piece
         # filleted. A straight has no such corner and `ray_ray` says so.
-        corner = ray_ray(
-            entry.position, entry.tangent, exit_.position, exit_.tangent
-        )
+        corner = ray_ray(entry.position, entry.tangent, exit_.position, exit_.tangent)
         if corner is not None and corner.distance_to(points[-1]) > 1e-6:
             points.append(corner)
     if end.distance_to(points[-1]) > 1e-6:
