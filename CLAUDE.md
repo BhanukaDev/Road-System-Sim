@@ -27,9 +27,11 @@ src/roadsim/
   geometry/   pure maths: vec, curve, line, arc, path, fitting, ribbon
   road/       lanes, profiles, nodes, segments, junctions, network
   render/     camera, grid, curve drawing, network renderer, HUD
-  editor/     commands/undo, snapping, tools, overlay
+  editor/     commands/undo, snapping, tools, shapers, guides, overlay
+  ui/         widgets, bars, panels - every bar generated from a registry
+  modes/      ways of using the world (view, roads), in modes/__init__.py
   serialization/  versioned JSON schema and file io
-  scenes/     one Scene subclass per mode, registered in scenes/__init__.py
+  scenes/     one Scene subclass per app surface, in scenes/__init__.py
   config.py   tunables and palette - no magic numbers elsewhere
   app.py      window, loop, camera controls shared by every scene
 docs/         architecture, decisions, per-milestone design notes
@@ -39,13 +41,17 @@ tests/        pytest, geometry-focused
 ## The rules that keep this from becoming one big file
 
 1. **Layering is one-directional:** `geometry` -> `road` -> `render` ->
-   `editor`. `geometry` knows nothing about roads; `road` knows nothing about
-   pygame; `render` knows nothing about the editor. A renderer never mutates the
-   model, and a tool never blits - a tool returns a `ToolPreview` and
-   `editor/overlay.py` is the only thing in `editor` that draws (D8).
+   `editor` -> `ui` -> `modes` -> `scenes`. `geometry` knows nothing about roads;
+   `road` knows nothing about pygame; `render` knows nothing about the editor; the
+   interface drives the editor and never the reverse (D8, D9). A renderer never
+   mutates the model, and a tool never blits - a tool returns a `ToolPreview` and
+   `editor/overlay.py` is the only thing in `editor` that draws.
 2. **New behaviour is a new file plus one registry line**, never an `if` branch
-   in something large. Tools register in `editor/toolbox.py`, scenes in
-   `scenes/__init__.py`, lane types in `road/lane.py`.
+   in something large. Tools register in `editor/toolbox.py`, road shapes in
+   `editor/shapers/__init__.py`, modes in `modes/__init__.py`, scenes in
+   `scenes/__init__.py`, lane types in `road/lane.py`, curve-pair intersections in
+   `geometry/intersect.py`. The interface is generated from those same registries,
+   so a new entry appears on screen without `ui/` learning its name.
 3. **Every network mutation goes through a `Command`** with `do`/`undo`
    (`editor/commands.py`, M2). No tool mutates the network directly.
 4. **No magic numbers outside `config.py`.**
@@ -69,6 +75,13 @@ tests/        pytest, geometry-focused
   Never hardcode a segment count.
 - Freehand drawing goes through `fit_freehand`: simplify the stroke, then fillet
   the corners. That is how "organic" and "arc + line" coexist.
+- **`project()` clamps to the nearer endpoint, so it is not a containment test.**
+  Asking whether a point lies on an arc goes through `ArcSegment.s_at_angle`. Get
+  this wrong and an intersection past the end of a curve is reported *at* its end -
+  a plausible junction in the wrong place rather than a visible failure (D11).
+- A curve is too tight for its own road when an inner lane edge folds through the
+  arc centre. That is `is_degenerate`, checked by the renderer beside
+  `is_too_short` - never an exception, and never a lane drawn inside out.
 
 ## Testing
 
@@ -83,16 +96,33 @@ Keep new geometry work visible there.
 
 ## Status
 
-M0, M1 and **M2 are done**: the geometry kernel, `road/` (profiles, segments,
+M0, M1 and M2 are done: the geometry kernel, `road/` (profiles, segments,
 network, derived junctions), the network renderer, `serialization/`, and
-`editor/` (commands with undo, snapping, four tools). `editor` is the default
-scene; `--scene network` shows the hardcoded showcase and `--scene debug` M1's
-geometry surface.
+`editor/` (commands with undo, snapping, four tools).
 
-M3 (textures and markings) is next - see `docs/roadmap.md`. It also owes M2 two
-things: exact curve-curve junction intersection in place of the straight-ray
-approximation and its trim cap, and splitting a road where a new one *crosses*
-it rather than only where it ends on it.
+**M3 - editor, UI and crossings - is in progress.** The design and the full
+requirement list are in `docs/milestone-3-editor-and-ui.md`.
 
-See `docs/milestone-2-network-and-editor.md` for the M2 design and
-`docs/decisions.md` for why things are the way they are.
+Landed so far:
+
+- **Controls and crash safety.** `render/camera_input.py` owns pan and zoom -
+  WASD, arrows, screen edge, middle-drag - and cancels a drag on focus loss.
+  `RoadSegment.is_degenerate` flags a curve too tight for its own width instead
+  of letting the renderer draw the lane inside out. `RoadProfile.mirrored()` no
+  longer collides with its original in a save file.
+- **Exact geometry.** `geometry/aabb.py`, `intersect.py`, `fillet.py`,
+  `polygon.py`, plus `ArcSegment.s_at_angle`. `fit_polyline` delegates its corner
+  maths to `fillet.py`, with `tests/test_fitting.py` passing unchanged as proof.
+- **Game interface and modes.** `ui/` and `modes/`; `scenes/game.py` is the
+  default scene, opening in view mode with a road mode beside it.
+
+Still to come: previews that show the real road, end caps, lane anchors and
+alignment guides; shapers (straight / curve / freeform / continuous), loops,
+bulldoze and replace; levels, colliders and crossings; then exact junction trims,
+rounded corners, the corner handle and pavements.
+
+`--scene editor` keeps M2's road-only shell, `--scene network` the hardcoded
+showcase and `--scene debug` M1's geometry surface.
+
+See `docs/decisions.md` for why things are the way they are - D9 to D11 are this
+milestone's.

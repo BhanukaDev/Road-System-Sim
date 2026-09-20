@@ -98,6 +98,32 @@ class ArcSegment(Curve):
         gap = self.radius * (2.0 * math.pi) - s
         return 0.0 if gap < (s - self.length) else self.length
 
+    def s_at_angle(self, angle: float, tolerance: float = 0.0) -> float | None:
+        """Arc length of the point at `angle`, or `None` if the sweep misses it.
+
+        This is the containment test, and it is **not** `project`. `project`
+        clamps to the nearer endpoint, so asking it whether a point lies on this
+        arc reports every point past the end as lying exactly at the end - which
+        turns "these curves do not meet" into "they meet at the corner". Anything
+        deciding whether an intersection is real has to come through here.
+
+        `tolerance` is in radians and only rescues an angle that has drifted a
+        hair past an end, which is how a hit exactly on a join arrives.
+        """
+        span = abs(self.sweep)
+        turned = ((angle - self.start_angle) * self.turn_sign) % (2.0 * math.pi)
+        if turned > span:
+            if turned - span <= tolerance:
+                turned = span
+            elif (2.0 * math.pi) - turned <= tolerance:
+                turned = 0.0
+            else:
+                return None
+        return turned * self.radius
+
+    def contains_angle(self, angle: float, tolerance: float = 0.0) -> bool:
+        return self.s_at_angle(angle, tolerance) is not None
+
     # -- construction ------------------------------------------------------
 
     @staticmethod

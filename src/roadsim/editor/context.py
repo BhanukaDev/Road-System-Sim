@@ -56,10 +56,19 @@ class ToolPreview:
     snap: Snap | None = None
     invalid: bool = False
     """The preview cannot be committed as it stands - drawn as a warning."""
+    measurement: float | None = None
+    angle: float | None = None
 
     @property
     def is_empty(self) -> bool:
-        return not (self.paths or self.points or self.rubber_band or self.snap)
+        return not (
+            self.paths
+            or self.points
+            or self.rubber_band
+            or self.snap
+            or self.measurement is not None
+            or self.angle is not None
+        )
 
 
 class EditorContext:
@@ -128,6 +137,18 @@ class EditorContext:
     def cycle_profile(self, step: int = 1) -> RoadProfile:
         self.profile_index = (self.profile_index + step) % len(self.profile_names)
         self.status = f"profile: {self.profile.name}"
+        return self.profile
+
+    def select_profile(self, name: str) -> RoadProfile:
+        """Pick a profile by name - what a road button on the bar does.
+
+        Unknown names are ignored rather than raising: the interface is generated
+        from the same registry, so a name that is not there means the two have
+        fallen out of step, and taking the window down is not the way to say so.
+        """
+        if name in self.profile_names:
+            self.profile_index = self.profile_names.index(name)
+            self.status = f"profile: {name}"
         return self.profile
 
     # -- convenience for tools --------------------------------------------

@@ -50,7 +50,12 @@ def pick(ctx: EditorContext, point: Vec2) -> Selection:
 
 
 def describe(ctx: EditorContext) -> list[str]:
-    sel = ctx.selection
+    return describe_selection(ctx, ctx.selection)
+
+
+def describe_selection(ctx: EditorContext, sel: Selection) -> list[str]:
+    """What a node or road is, in words. Split out from `describe` so a mode can
+    report what the cursor is *over* as well as what is selected."""
     if sel.node is not None and sel.node in ctx.network.nodes:
         return _describe_node(ctx, sel.node)
     if sel.segment is not None and sel.segment in ctx.network.segments:
@@ -81,4 +86,9 @@ def _describe_segment(ctx: EditorContext, segment_id: int) -> list[str]:
     ]
     if seg.is_too_short:
         lines.append("  TOO SHORT - its junctions have eaten it")
+    if seg.is_degenerate:
+        lines.append(
+            f"  TOO TIGHT - a curve leaves {seg.tightest_clearance():.1f} m at the"
+            f" inner edge of a {profile.total_width:.1f} m road"
+        )
     return lines

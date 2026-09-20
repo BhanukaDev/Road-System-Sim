@@ -121,3 +121,21 @@ def test_garbage_is_rejected_rather_than_crashing():
         loads("{ not json")
     with pytest.raises(SchemaError):
         loads("[1, 2, 3]")
+
+
+def test_a_network_holding_a_profile_and_its_mirror_round_trips():
+    """Profiles are written keyed by name. When a mirror kept its original's name
+    the payload held one entry for the two of them and both roads loaded as
+    whichever won - silently, and only in a file that had been flipped."""
+    net = RoadNetwork()
+    net.connect(Vec2(-40.0, 0.0), Vec2(40.0, 0.0), ASYMMETRIC_BOULEVARD)
+    net.connect(Vec2(-40.0, 30.0), Vec2(40.0, 30.0), ASYMMETRIC_BOULEVARD.mirrored())
+    net.rebuild_all()
+
+    payload = dumps(net)
+    assert len(network_to_dict(net)["profiles"]) == 2
+    assert dumps(loads(payload)) == payload
+
+    reloaded = loads(payload)
+    first, second = (reloaded.segments[sid] for sid in sorted(reloaded.segments))
+    assert first.profile.lanes != second.profile.lanes

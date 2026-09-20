@@ -13,7 +13,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .. import config
-from ..geometry import Path, Ribbon, Sample, Vec2, build_ribbon, fit_polyline
+from ..geometry import (
+    ArcSegment,
+    Path,
+    Ribbon,
+    Sample,
+    Vec2,
+    build_ribbon,
+    fit_polyline,
+)
 from .profile import RoadProfile
 
 
@@ -83,6 +91,54 @@ class RoadSegment:
         renderer checks - never an exception out of `Path.trimmed` mid-frame.
         """
         return self.carriageway_length < config.MIN_CARRIAGEWAY
+
+    @property
+    def is_degenerate(self) -> bool:
+        """True when a curve here is too tight for this profile's own width.
+
+        An edge `d` inside an arc of radius `r` has radius `r - d`. Once `d`
+        reaches `r` that edge folds through the arc centre: the exact route
+        (`lane_centerline`, and every collision query built on `path.offset`)
+        raises `DegenerateOffsetError`, and the sampled route (`lane_ribbon`)
+        quietly renders the lane inside out - a self-crossing outline that draws
+        as holes and bowties, worst on the widest lanes, which is to say the
+        pavements.
+
+        So it is a flag the renderer checks, exactly like `is_too_short` - never
+        an exception out of a ribbon mid-frame. `fit_polyline` clamps a fillet
+        against its neighbouring straights but knows nothing about how wide the
+        road is, so nothing upstream rules this out.
+        """
+        return self.tightest_clearance() < config.MIN_LANE_CLEARANCE
+
+    def tightest_clearance(self) -> float:
+        """Least radius left at any inner lane edge. `inf` when there is no arc.
+
+        Which side is *inner* is the turn direction: a left turn (positive sweep)
+        curves around a centre on its left, so the left extent is the one at risk
+        (D3). Getting this backwards flags right-hand curves and passes left-hand
+        ones, which looks like a rendering bug rather than a sign error.
+        """
+        worst = float("inf")
+        for piece in self.path.pieces:
+            if not isinstance(piece, ArcSegment):
+                continue
+            inner = (
+                self.profile.extent_left
+                if piece.turn_sign > 0.0
+                else self.profile.extent_right
+            )
+            worst = min(worst, piece.radius - inner)
+        return worst
+
+    @property
+    def is_broken(self) -> bool:
+        """Either failure mode: eaten by its junctions, or curved too tight.
+
+        One property so the renderer asks one question. Which one it is belongs
+        in the HUD, where the user can act on it - not in the draw loop.
+        """
+        return self.is_too_short or self.is_degenerate
 
     def end_s(self, at_a: bool) -> float:
         """Arc length of the carriageway end at this side of the segment."""

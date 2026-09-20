@@ -101,6 +101,22 @@ def test_mirroring_reverses_the_cross_section_exactly():
     assert m.mirrored().edges == p.edges
 
 
+def test_a_mirror_is_named_apart_from_its_original():
+    """A save file keys profiles by name, so a mirror sharing its original's name
+    means one of the two silently loads as the other."""
+    p = profile(WALK, CAR_B, CAR_F, CAR_F, WALK)
+    assert p.mirrored().name != p.name
+
+
+def test_mirroring_twice_restores_the_name_as_well_as_the_shape():
+    """Which is what makes a flip-and-flip-back round trip byte-identical."""
+    p = profile(WALK, CAR_B, CAR_F, CAR_F, WALK)
+    there_and_back = p.mirrored().mirrored()
+    assert there_and_back.name == p.name
+    assert there_and_back.lanes == p.lanes
+    assert approx(there_and_back.datum, p.datum)
+
+
 def test_a_profile_needs_at_least_one_lane():
     with pytest.raises(ValueError):
         RoadProfile("empty", ())

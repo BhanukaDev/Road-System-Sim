@@ -157,3 +157,96 @@ the real code path with no display, no event loop and no mouse.
 **If you ever need `render` to know about a selection**, that is the signal this
 decision was wrong - stop and invert it deliberately rather than adding one
 import.
+
+---
+
+## D9. `ui` sits above `editor`, and a mode is a way of using one world
+
+**The shape:** `geometry -> road -> render -> editor -> ui -> modes -> scenes`.
+
+An interface that drives the editor depends on it, so it sits above it. This is
+D8's argument one layer further out, and the same test applies: if `editor` ever
+needs to import from `ui`, that is the signal to stop and invert deliberately
+rather than adding one import.
+
+**Modes share one `EditorContext`.** A view mode is not a different world from an
+edit mode; it is the same world with no mutations, and it enforces that by simply
+never calling `apply()`. The alternative - a state object per mode - raises the
+question of which one owns the network the moment there are two, and there is only
+one right answer to that. `EditorContext` already carries exactly the set every
+mode needs (network, camera, history, snapper, selection, cursor, status, active
+profile), so the name now means *the session*. Renaming it would be churn across
+every tool and test for nothing.
+
+**Event order, first consumer wins:** window, then `UiScreen`, then scene-level
+keys, then the active mode and its tools, then the camera. Two consequences worth
+stating because both are bugs if you get them backwards:
+
+- **Chrome consumes everything over it, the wheel included.** Scrolling the road
+  bar must not zoom the world behind it, and the scene asks `ui.wants(pos)` before
+  touching the cursor - otherwise a tool previews a road underneath the bar.
+- **The camera goes last.** A tool always gets first refusal on a button, so a new
+  tool can claim one without the camera having to know.
+
+**Every bar is generated from a registry** - `PROFILES`, `TOOLS`, `SHAPERS`,
+`MODES`. This is rule 2 paying the interface as well as the model: a new tool,
+shaper, mode or road type appears on screen for free. `tests/test_ui.py` asserts
+the bars against the registries, so a hardcoded button list fails the suite.
+
+---
+
+## D10. Camera *control* is a controller, not an event ladder
+
+**What this replaces:** pan and zoom wired directly into `app.py`'s event loop.
+
+Two things were wrong with that, and only one of them was visible. The visible one
+was the bindings - middle-drag alone, which on a trackpad reads as panning being
+broken. The other was that a drag has **state**, and state only cleared by a
+`MOUSEBUTTONUP` *inside* the window gets stuck: release off-window or alt-tab
+mid-drag and the camera panned forever afterwards.
+
+`CameraController` lives in `render/` because it knows only `Camera` and pygame,
+and it takes `cancel()` from the window's own focus events. The real payoff is
+that it can be driven from a test with synthetic events and no window, which is
+how the control the user touches most finally got covered at all.
+
+**Pan speeds are in pixels per second, converted through `camera.zoom`** - the
+same reasoning as D8's snap radii. Metres per second would crawl when zoomed in
+and fly when zoomed out, which reads as two different controls rather than one.
+
+**Right-drag is deliberately not a pan.** It would have to be disambiguated from
+right-click, which tools already use, and the only honest way to do that is to
+replay synthetic events once a press turns out not to be a drag. WASD, the arrow
+keys, the screen edge and middle-drag cover it without touching a tool's button.
+
+---
+
+## D11. A curve intersection is a `Hit` with an arc length on both curves
+
+M2 approximated junction trimming by crossing the straight tangent *rays* at a
+node, and capped the result because nearly-parallel kerbs cross near infinity.
+Exact curve-curve intersection retires both, and four other features turned out to
+need the same primitive: detecting that a new road crosses an existing one,
+refusing a road that overlaps itself, rounding a junction corner, and collision
+detection generally. So it is one module, built alone, before any consumer.
+
+**Both arc lengths, always.** A crossing is a place to *split* a road, and a split
+needs `s`. That the point agrees from either parameterisation is the module's
+central invariant, asserted at `EXACT`.
+
+**Containment goes through `ArcSegment.s_at_angle`, never `project`.** `project`
+clamps to the nearer endpoint - so asking it whether a point lies on an arc reports
+every point past the end as lying *at* the end. Used for containment it turns
+"these curves do not meet" into "they meet at the corner", which is a plausible
+junction in the wrong place rather than a visible failure. This is the single most
+likely bug in anything built on this module.
+
+**A hit on a join is found twice**, once from each piece meeting there, so path
+queries dedupe. Undeduped, a crossing at a join splits a road twice a hair apart
+and leaves a sliver segment that immediately flags `is_too_short`.
+
+**Bounding boxes are closed-form, never sampled.** A sampled box misses the bulge
+between samples, and every rejection test built on it is only sound if the box is a
+true bound. An arc's box is its endpoints plus whichever of the four axis extremes
+its sweep actually covers.
+

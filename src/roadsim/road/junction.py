@@ -17,11 +17,10 @@ import math
 from dataclasses import dataclass, field
 
 from .. import config
-from ..geometry import Vec2
+from ..geometry import Vec2, ray_ray
 from .profile import RoadProfile
 from .segment import RoadSegment
 
-PARALLEL_EPS = 1e-9
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +147,7 @@ def _pair_demand(a: SegmentEnd, b: SegmentEnd) -> list[tuple[SegmentEnd, float]]
     corner blunt instead, which is wrong by a little rather than by a kilometre.
     M3 fillets the corner properly and the cap goes with the approximation.
     """
-    hit = _ray_intersection(
+    hit = ray_ray(
         a.outgoing_dir.rot90() * a.extent_left,
         a.outgoing_dir,
         b.outgoing_dir.rot90() * -b.extent_right,
@@ -161,15 +160,6 @@ def _pair_demand(a: SegmentEnd, b: SegmentEnd) -> list[tuple[SegmentEnd, float]]
         (a, min(hit.dot(a.outgoing_dir), limit)),
         (b, min(hit.dot(b.outgoing_dir), limit)),
     ]
-
-
-def _ray_intersection(p: Vec2, u: Vec2, q: Vec2, v: Vec2) -> Vec2 | None:
-    """Intersection of `p + t*u` and `q + w*v`, relative to a shared origin."""
-    denom = u.cross(v)
-    if abs(denom) < PARALLEL_EPS:
-        return None  # parallel kerbs: opposite ends of one straight road
-    t = (q - p).cross(v) / denom
-    return p + u * t
 
 
 def _polygon(

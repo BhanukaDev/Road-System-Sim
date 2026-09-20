@@ -29,7 +29,7 @@ class NetworkRenderer:
     def draw(
         self, surface: pygame.Surface, camera: Camera, network: RoadNetwork
     ) -> None:
-        drawable = [s for s in network.segments.values() if not s.is_too_short]
+        drawable = [s for s in network.segments.values() if not s.is_broken]
 
         for layer in LAYERS:
             for segment in drawable:
@@ -43,7 +43,7 @@ class NetworkRenderer:
                 self._draw_arrows(surface, camera, segment)
 
         for segment in network.segments.values():
-            if segment.is_too_short:
+            if segment.is_broken:
                 self._draw_error(surface, camera, segment)
 
     # -- pieces ------------------------------------------------------------
@@ -131,8 +131,9 @@ class NetworkRenderer:
     def _draw_error(
         self, surface: pygame.Surface, camera: Camera, segment: RoadSegment
     ) -> None:
-        """A segment its own junctions have eaten. Drawn, loudly, as a centreline
-        rather than silently skipped - the user needs to see where it went."""
+        """A segment that cannot be drawn as a road - eaten by its junctions, or
+        curved tighter than its own width allows. Drawn, loudly, as a centreline
+        rather than silently skipped: the user needs to see where it went."""
         points = to_screen_points(camera, segment.path.points(camera.world_tolerance))
         if len(points) >= 2:
             pygame.draw.lines(surface, config.Color.SEGMENT_ERROR, False, points, 3)

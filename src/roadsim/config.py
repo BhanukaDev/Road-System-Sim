@@ -48,6 +48,51 @@ DIRECTION_ARROW_LENGTH = 3.0
 DIRECTION_ARROW_MIN_PX = 26.0
 """Below this on-screen lane length, arrows are skipped rather than crammed."""
 
+PAN_KEY_SPEED_PX = 900.0
+"""Keyboard and screen-edge pan speed, in *pixels* per second, converted to
+metres through `camera.zoom`. Pixels rather than metres for the same reason snap
+radii are (D8): a pan measured in metres crawls when you are zoomed in and flies
+when you are zoomed out, which reads as two different controls."""
+PAN_EDGE_PX = 24.0
+"""How close to the window edge the cursor has to be to pan. 0 disables it."""
+
+DRAG_THRESHOLD_PX = 6.0
+"""Past this, a mouse press is a freehand stroke rather than a click."""
+EDITOR_ZOOM = 6.0
+"""Pixels per metre the editor opens at - wide enough to watch a junction form."""
+
+MIN_ROAD_LENGTH = 1.0
+"""Metres. Shorter than this and there is no road, only a mistake."""
+MIN_LANE_CLEARANCE = 0.25
+"""Metres of turning radius that must survive at a curve's innermost lane edge.
+
+An edge `d` inside an arc of radius `r` has radius `r - d`, so once `d` reaches
+`r` the edge folds through the arc centre: the exact offset raises
+`DegenerateOffsetError` and the sampled ribbon renders inside out, as holes and
+bowties. This is the margin that keeps the fold out of reach."""
+
+# -- interface -------------------------------------------------------------
+
+UI_FONT_SIZE = 15
+UI_FONT_SMALL = 12
+UI_PADDING = 8.0
+"""Inside a panel, between its edge and its contents."""
+UI_GAP = 6.0
+"""Between neighbouring widgets in a bar."""
+UI_RADIUS = 4
+"""Corner rounding on buttons and panels, in pixels."""
+UI_BAR_HEIGHT = 64.0
+"""The bottom road bar. Tall enough for a cross-section swatch and a name."""
+UI_ROW_HEIGHT = 30.0
+"""A row of plain text buttons - the mode and tool rows."""
+UI_BUTTON_WIDTH = 132.0
+UI_ROW_BUTTON_WIDTH = 96.0
+UI_SWATCH_HEIGHT = 16.0
+"""Height of a profile's cross-section swatch inside its button."""
+UI_SWATCH_MIN_LANE_PX = 2.0
+"""A lane narrower than this on screen is still drawn this wide, so a bike lane
+does not vanish from the swatch it is meant to explain."""
+
 
 class Color:
     BACKGROUND = (28, 30, 34)
@@ -91,3 +136,14 @@ class Color:
     HUD_TEXT = (214, 218, 226)
     HUD_DIM = (128, 134, 144)
     HUD_BACK = (18, 19, 22)
+
+    UI_PANEL = (22, 24, 28)
+    UI_PANEL_EDGE = (46, 50, 58)
+    UI_BUTTON = (38, 41, 48)
+    UI_BUTTON_HOVER = (52, 57, 66)
+    UI_BUTTON_ACTIVE = (78, 104, 142)
+    UI_BUTTON_EDGE = (62, 68, 78)
+    UI_TEXT = (222, 226, 234)
+    UI_TEXT_DIM = (136, 142, 154)
+    UI_TEXT_ACTIVE = (240, 246, 255)
+    UI_ACCENT = (120, 170, 236)

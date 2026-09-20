@@ -32,3 +32,9 @@ class Scene(ABC):
 
     def hud_lines(self) -> list[str]:
         return []
+
+    @property
+    def hud_origin(self) -> tuple[int, int]:
+        """Where the app puts the text readout. A scene with chrome of its own
+        moves it out from under that chrome rather than drawing over it."""
+        return (12, 10)

@@ -20,11 +20,6 @@ from ..context import EditorContext, ToolPreview
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
 
-DRAG_THRESHOLD_PX = 6.0
-"""Past this, a press is a freehand stroke rather than a click."""
-MIN_ROAD_LENGTH = 1.0
-"""Metres. Shorter than this and there is no road, only a mistake."""
-
 
 class DrawRoadTool(Tool):
     name = "draw"
@@ -79,7 +74,8 @@ class DrawRoadTool(Tool):
         ctx.cursor = self._snap(ctx, event.pos).position
         if self._pressed_at is None:
             return False
-        if not self._dragging and _pixels_from(self._pressed_at, event.pos) > DRAG_THRESHOLD_PX:
+        moved = _pixels_from(self._pressed_at, event.pos)
+        if not self._dragging and moved > config.DRAG_THRESHOLD_PX:
             # Turned out to be a sketch. The press point is the stroke's start.
             self._dragging = True
             self.stroke = [ctx.world(*self._pressed_at)]
@@ -173,7 +169,11 @@ class DrawRoadTool(Tool):
         if points and len(points) >= 2:
             fit = fit_freehand if self._dragging else fit_polyline
             try:
-                preview.paths.append(fit(list(points), config.DEFAULT_CORNER_RADIUS))
+                path = fit(list(points), config.DEFAULT_CORNER_RADIUS)
+                preview.paths.append(path)
+                preview.measurement = path.length
+                if len(points) >= 3:
+                    preview.angle = (path.end.position - path.start.position).angle
             except ValueError:
                 pass  # not yet two distinct points; nothing to show
         return preview
@@ -208,11 +208,11 @@ def build_road_command(
     Returns the command, or a message explaining why there is no road to build.
     Kept a free function so a test can exercise it without a mouse.
     """
-    # Order matters: a road drawn back to its own start is better explained as
-    # a loop than as a short road, however short it happens to be.
     if _same_node(start, end):
-        return "both ends are the same node"
-    if points[0].distance_to(points[-1]) < MIN_ROAD_LENGTH:
+        if _loop_too_short(points):
+            return "road is too short"
+        return _loop_command(ctx, points, start.node_id)
+    if points[0].distance_to(points[-1]) < config.MIN_ROAD_LENGTH:
         return "road is too short"
 
     start_hit = start.segment_hit if start else None
@@ -244,6 +244,25 @@ def _endpoint(steps: list[Command], point: Vec2, snap: Snap | None) -> NodeSlot:
     return create.slot
 
 
+def _loop_command(ctx: EditorContext, points: list[Vec2], node_id: int) -> Composite:
+    """Split a same-node closure into two open segments sharing both endpoints."""
+    mid = max(1, len(points) // 2)
+    split = CreateNode(points[mid])
+    first = AddSegment(NodeSlot(node_id), split.slot, points[: mid + 1], ctx.profile)
+    second = AddSegment(split.slot, NodeSlot(node_id), points[mid:], ctx.profile)
+    return Composite([split, first, second], label="draw loop")
+
+
+def _loop_too_short(points: list[Vec2]) -> bool:
+    if len(points) < 3:
+        return True
+    loop = points[:-1] if points[0].distance_to(points[-1]) <= 1e-9 else points
+    try:
+        return fit_polyline(loop, config.DEFAULT_CORNER_RADIUS).length < config.MIN_ROAD_LENGTH
+    except ValueError:
+        return True
+
+
 def _same_node(a: Snap | None, b: Snap | None) -> bool:
     return (
         a is not None
@@ -264,20 +283,16 @@ def _corner_points(path: Path, start: Vec2, end: Vec2) -> list[Vec2]:
     points = [start]
     for piece, _ in zip(path.pieces, path.piece_starts):
         entry, exit_ = piece.start, piece.end
-        corner = _tangent_crossing(entry.position, entry.tangent, exit_.position, exit_.tangent)
+        # Where the entry and exit tangents cross is the corner this piece
+        # filleted. A straight has no such corner and `ray_ray` says so.
+        corner = ray_ray(
+            entry.position, entry.tangent, exit_.position, exit_.tangent
+        )
         if corner is not None and corner.distance_to(points[-1]) > 1e-6:
             points.append(corner)
     if end.distance_to(points[-1]) > 1e-6:
         points.append(end)
     return points
-
-
-def _tangent_crossing(p: Vec2, u: Vec2, q: Vec2, v: Vec2) -> Vec2 | None:
-    """Where an arc's entry and exit tangents cross - the corner it filleted."""
-    denom = u.cross(v)
-    if abs(denom) < 1e-9:
-        return None  # a straight, which has no corner of its own
-    return p + u * ((q - p).cross(v) / denom)
 
 
 def _pixels_from(a: tuple[int, int], b: tuple[int, int]) -> float:

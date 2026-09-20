@@ -109,9 +109,27 @@ class RoadProfile:
 
         Lane order reverses, travel directions flip, and the datum flips with
         them - which is exactly what an end at `node_b` sees.
+
+        **The name has to change with them.** A save file keys its profiles by
+        name, so a network holding both a profile and its mirror under one name
+        writes a single entry and loads both roads as whichever won. Mirroring
+        twice strips the suffix again, so `mirrored().mirrored()` is the original
+        in name as well as in shape - which is what keeps a flip-and-flip-back
+        round trip byte-identical.
         """
         lanes = tuple(
             LaneSpec(lane.width, lane.direction.flipped(), lane.type, lane.speed_limit)
             for lane in reversed(self.lanes)
         )
-        return RoadProfile(self.name, lanes, -self.datum)
+        return RoadProfile(mirror_name(self.name), lanes, -self.datum)
+
+
+MIRROR_SUFFIX = "_mirrored"
+"""Marks a profile as another one seen from the far end. See `mirrored`."""
+
+
+def mirror_name(name: str) -> str:
+    """The name of `name`'s mirror. An involution, so applying it twice returns."""
+    if name.endswith(MIRROR_SUFFIX):
+        return name[: -len(MIRROR_SUFFIX)]
+    return name + MIRROR_SUFFIX

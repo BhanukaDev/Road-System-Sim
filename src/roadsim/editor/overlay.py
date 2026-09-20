@@ -118,6 +118,17 @@ class EditorOverlay:
         for point in preview.points:
             pygame.draw.circle(surface, color, camera.to_screen(point), 4, 1)
 
+        if preview.measurement is not None and preview.paths:
+            path = preview.paths[-1]
+            anchor = path.sample(path.length / 2.0).position
+            x, y = camera.to_screen(anchor)
+            label = pygame.font.SysFont("consolas,menlo,monospace", 12).render(
+                f"{preview.measurement:.1f} m",
+                True,
+                config.Color.HUD_TEXT,
+            )
+            surface.blit(label, (x + 8, y - 8))
+
         if preview.snap is not None:
             self._draw_snap(surface, camera, preview.snap)
 

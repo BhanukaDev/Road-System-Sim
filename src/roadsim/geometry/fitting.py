@@ -11,22 +11,13 @@ like a road rather than like a squiggle.
 
 from __future__ import annotations
 
-import math
-
-from .arc import ArcSegment
 from .curve import Curve
+from .fillet import EPS, MIN_RADIUS, corner_fillet
 from .line import LineSegment
 from .path import Path
 from .vec import Vec2
 
-EPS = 1e-6
-MIN_RADIUS = 0.5
-"""Metres. Below this a corner is left as a hard kink rather than filleted."""
-
-
-def _deflection(u: Vec2, v: Vec2) -> float:
-    """Angle turned between two unit directions, in [0, pi]."""
-    return math.acos(min(max(u.dot(v), -1.0), 1.0))
+__all__ = ["EPS", "MIN_RADIUS", "fit_freehand", "fit_polyline", "simplify"]
 
 
 def fit_polyline(points: list[Vec2], radius: float) -> Path:
@@ -40,32 +31,21 @@ def fit_polyline(points: list[Vec2], radius: float) -> Path:
     dirs = [(pts[i + 1] - pts[i]).normalized() for i in range(len(pts) - 1)]
     seg_lengths = [pts[i].distance_to(pts[i + 1]) for i in range(len(pts) - 1)]
 
-    # Desired tangent pull-back per interior corner.
-    tangents: list[float] = [0.0] * len(pts)
-    angles: list[float] = [0.0] * len(pts)
-    for i in range(1, len(pts) - 1):
-        phi = _deflection(dirs[i - 1], dirs[i])
-        angles[i] = phi
-        if phi < EPS or math.pi - phi < EPS:
-            continue  # collinear, or a full reversal we cannot fillet
-        tangents[i] = radius * math.tan(phi / 2.0)
-
-    _clamp_tangents(tangents, seg_lengths)
-
     pieces: list[Curve] = []
     cursor = pts[0]
     for i in range(1, len(pts) - 1):
-        t = tangents[i]
-        if t < EPS:
-            continue
-        r = t / math.tan(angles[i] / 2.0)
-        if r < MIN_RADIUS:
-            continue
-        entry = pts[i] - dirs[i - 1] * t
-        exit_ = pts[i] + dirs[i] * t
-        _push_line(pieces, cursor, entry)
-        pieces.append(ArcSegment.from_tangent_points(entry, dirs[i - 1], exit_, r))
-        cursor = exit_
+        fillet = corner_fillet(
+            pts[i],
+            dirs[i - 1],
+            dirs[i],
+            radius,
+            *_room(seg_lengths, i),
+        )
+        if fillet is None:
+            continue  # collinear, a reversal, or squeezed below MIN_RADIUS
+        _push_line(pieces, cursor, fillet.entry)
+        pieces.append(fillet.arc)
+        cursor = fillet.exit
     _push_line(pieces, cursor, pts[-1])
 
     if not pieces:
@@ -103,17 +83,15 @@ def simplify(points: list[Vec2], tolerance: float) -> list[Vec2]:
     return [p for p, k in zip(pts, keep) if k]
 
 
-def _clamp_tangents(tangents: list[float], seg_lengths: list[float]) -> None:
-    """Cap each fillet at half of its shorter neighbouring straight, in place.
+def _room(seg_lengths: list[float], corner: int) -> tuple[float, float]:
+    """How much straight corner `corner` may eat on each side: half of each.
 
     Halves rather than scaling a shared straight proportionally: two identical
     corners then get identical radii regardless of which end we clamp from, and
     every straight keeps some length of its own - which is the room junction
     trimming will want at each end later.
     """
-    for corner in range(1, len(tangents) - 1):
-        room = min(seg_lengths[corner - 1], seg_lengths[corner]) * 0.5
-        tangents[corner] = min(tangents[corner], room)
+    return seg_lengths[corner - 1] * 0.5, seg_lengths[corner] * 0.5
 
 
 def _push_line(pieces: list[Curve], a: Vec2, b: Vec2) -> None:

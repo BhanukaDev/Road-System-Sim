@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import pytest
 
+from roadsim import config
 from roadsim.geometry import Vec2
 from roadsim.road.presets import ASYMMETRIC_BOULEVARD, RESIDENTIAL_TWO_WAY
+from roadsim.road.profile import RoadProfile
 from roadsim.road.segment import RoadSegment
 
 from .conftest import EXACT, approx, assert_vec
@@ -120,3 +122,45 @@ def test_refitting_is_stable():
     seg.refit()
     for a, b in zip(before, seg.path.points(0.05)):
         assert a.distance_to(b) <= EXACT
+
+
+def test_a_curve_too_tight_for_the_road_is_flagged_not_rendered_folded():
+    """An edge `d` inside an arc of radius `r` has radius `r - d`, so a hairpin
+    narrower than the road folds that edge through the arc centre. Sampled, it
+    draws inside out - holes and bowties, worst on the widest lanes, which is to
+    say the pavements. So it is a flag, like `is_too_short`, never an exception
+    and never a silent mess on screen."""
+    hairpin = segment(points=[Vec2(0.0, 0.0), Vec2(30.0, 0.0), Vec2(0.0, 3.0)])
+    assert hairpin.is_degenerate
+    assert hairpin.is_broken
+    assert hairpin.tightest_clearance() < config.MIN_LANE_CLEARANCE
+
+
+def test_a_gentle_curve_in_a_wide_road_is_left_alone():
+    seg = segment(profile=ASYMMETRIC_BOULEVARD, radius=40.0)
+    assert not seg.is_degenerate
+    assert seg.tightest_clearance() >= config.MIN_LANE_CLEARANCE
+
+
+def test_a_road_with_no_curve_at_all_has_unlimited_clearance():
+    straight = segment(points=[Vec2(0.0, 0.0), Vec2(50.0, 0.0)])
+    assert straight.tightest_clearance() == float("inf")
+    assert not straight.is_degenerate
+
+
+def test_which_side_is_inner_follows_the_turn_direction():
+    """A left turn curves around a centre on its left, so the left extent is the
+    one at risk (D3). Backwards, this flags right-hand curves and passes
+    left-hand ones - which looks like a rendering bug, not a sign error."""
+    lanes = ASYMMETRIC_BOULEVARD.lanes
+    wide_left = RoadProfile("wide_left", lanes, datum=6.0)
+    radius = 20.0
+    left_turn = [Vec2(-60.0, 0.0), Vec2(0.0, 0.0), Vec2(60.0, 60.0)]
+    right_turn = [Vec2(-60.0, 0.0), Vec2(0.0, 0.0), Vec2(60.0, -60.0)]
+
+    turning_left = segment(points=left_turn, profile=wide_left, radius=radius)
+    turning_right = segment(points=right_turn, profile=wide_left, radius=radius)
+
+    assert approx(turning_left.tightest_clearance(), radius - wide_left.extent_left)
+    assert approx(turning_right.tightest_clearance(), radius - wide_left.extent_right)
+    assert turning_left.tightest_clearance() < turning_right.tightest_clearance()

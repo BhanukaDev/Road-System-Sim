@@ -12,7 +12,7 @@ import pytest
 from roadsim.editor.commands import Composite
 from roadsim.editor.context import EditorContext, Selection
 from roadsim.editor.snapping import Snap, SnapKind
-from roadsim.editor.tools.draw_road import build_road_command
+from roadsim.editor.tools.draw_road import DrawRoadTool, build_road_command
 from roadsim.editor.tools.move_node import MoveNodeTool
 from roadsim.editor.tools.profile import ProfileTool
 from roadsim.editor.tools.select import pick
@@ -96,14 +96,21 @@ def test_undoing_a_t_junction_puts_the_original_road_back(ctx):
     assert dumps(ctx.network) == before
 
 
-def test_a_road_ending_where_it_started_is_refused(ctx):
-    """A loop back to its own start is a case M2 does not model, so the tool
-    says so rather than building something the junction code has to guess at."""
+def test_a_road_ending_where_it_started_is_split_into_a_loop(ctx):
+    """A loop back to its own start becomes two road segments sharing a new node."""
     node = ctx.network.node_at(Vec2(-60.0, 0.0))
     snap = Snap(SnapKind.NODE, node.position, node.id)
     long_way = [node.position, Vec2(-120.0, 70.0), Vec2(-20.0, 70.0), node.position]
-    assert "same node" in draw(ctx, long_way, snap, snap)
-    assert "same node" in draw(ctx, [node.position, node.position], snap, snap)
+
+    command = draw(ctx, long_way, snap, snap)
+    assert isinstance(command, Composite)
+    assert len(ctx.network.nodes) == 3
+    assert len(ctx.network.segments) == 3
+    assert any(s.node_a == node.id or s.node_b == node.id for s in ctx.network.segments.values())
+
+    degenerate = draw(ctx, [node.position, node.position], snap, snap)
+    assert isinstance(degenerate, str)
+    assert "too short" in degenerate or "same node" in degenerate
 
 
 def test_a_road_too_short_to_exist_is_refused(ctx):
@@ -127,6 +134,17 @@ def test_a_refused_road_changes_nothing(ctx):
     draw(ctx, [Vec2(0.0, 50.0), Vec2(0.0, 50.2)])
     assert dumps(ctx.network) == before
     assert not ctx.history.can_undo
+
+
+def test_preview_reports_the_real_road_length(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(-20.0, 0.0)]
+    ctx.cursor = Vec2(20.0, 0.0)
+    preview = tool.preview(ctx)
+
+    assert len(preview.paths) == 1
+    assert preview.measurement is not None
+    assert approx(preview.measurement, 40.0)
 
 
 # -- moving ---------------------------------------------------------------
