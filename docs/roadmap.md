@@ -25,7 +25,7 @@ happens where roads meet.*
 
 Design: `docs/milestone-2-network-and-editor.md`
 
-## M3 - Textures & markings
+## M3 - Textures & markings — next
 
 Textured ribbons using the `s` coordinate ribbons already carry. Lane markings
 derived from adjacent `LaneSpec` pairs - dashed between same-direction lanes,
@@ -34,7 +34,8 @@ texturing and proper corner fillets. Rail sleepers, tram grooves, level
 crossings.
 
 Also: replace M2's straight-ray junction trimming with exact curve-curve
-intersection.
+intersection - which also retires the shallow-angle trim cap and lets a road
+split another where it *crosses* it, not just where it ends on it.
 
 Answers: *how do you texture all of this, and how do rail and tram lines sit in
 a road surface.*

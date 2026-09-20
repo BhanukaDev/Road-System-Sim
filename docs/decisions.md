@@ -122,3 +122,38 @@ Ribbons tighten the tolerance further on arcs in proportion to lane width: an
 edge `w` outside a curve of radius `r` bulges `(r + w) / r` more than the
 centreline, so without this the outermost lane of a tight curve facets visibly
 while the centreline looks fine.
+
+---
+
+## D8. `editor` sits above `render`, not beside it
+
+**The rule this replaces:** "`render` and `editor` both sit above `road` and know
+nothing about each other."
+
+That rule could not survive contact with an editor. Two things break it:
+
+- **Snap radii are in pixels.** A snap radius in metres gets harder to hit the
+  further you zoom out, which reads to the user as the editor being broken. So
+  `Snapper` needs `camera.zoom`, and `Camera` lives in `render`.
+- **The editor overlay draws editor state** - selection, snap marks, the
+  in-progress road. Whichever package it lives in depends on the other, so
+  "neither knows the other" is not available; only the *direction* is.
+
+So the layering is a straight line: `geometry` -> `road` -> `render` -> `editor`.
+`render` imports nothing from `editor`; the M2 sketch's
+`render/editor_overlay.py` is `editor/overlay.py` instead.
+
+**What the old rule was protecting, and how it is still protected.** The point
+was never the package boundary - it was that tools must not turn into renderers.
+That is kept by a narrower contract: a `Tool` returns a `ToolPreview` (paths,
+points, a snap) and never touches a surface. `editor/overlay.py` is the only
+file in `editor` that draws. So the M2 sketch's `Tool.draw_preview(surface)`
+became `Tool.preview() -> ToolPreview`.
+
+**What that buys beyond tidiness:** every tool is testable with no window open.
+`tests/test_tools.py` drives drawing, splitting, dragging and repainting through
+the real code path with no display, no event loop and no mouse.
+
+**If you ever need `render` to know about a selection**, that is the signal this
+decision was wrong - stop and invert it deliberately rather than adding one
+import.

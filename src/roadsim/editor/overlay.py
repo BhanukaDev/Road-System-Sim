@@ -1,0 +1,149 @@
+"""Everything the editor draws on top of the network.
+
+Tools produce a `ToolPreview` as geometry; this file is the only place in
+`editor/` that turns anything into pixels. It reads the model and the preview
+and mutates neither - the same read-only contract the renderers in `render/`
+work under (D8).
+"""
+
+from __future__ import annotations
+
+import pygame
+
+from .. import config
+from ..render.camera import Camera
+from ..render.curves import to_screen_points
+from ..road.network import RoadNetwork
+from .context import Selection, ToolPreview
+from .snapping import Snap, SnapKind
+
+SNAP_COLORS = {
+    SnapKind.NODE: config.Color.SNAP_NODE,
+    SnapKind.SEGMENT: config.Color.SNAP_SEGMENT,
+    SnapKind.ANGLE: config.Color.SNAP_ANGLE,
+    SnapKind.GRID: config.Color.SNAP_GRID,
+}
+
+
+class EditorOverlay:
+    def __init__(self, show_nodes: bool = True) -> None:
+        self.show_nodes = show_nodes
+        self.show_control_points = False
+
+    def draw(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        network: RoadNetwork,
+        selection: Selection,
+        preview: ToolPreview,
+    ) -> None:
+        if self.show_control_points:
+            self._draw_control_points(surface, camera, network)
+        self._draw_selection(surface, camera, network, selection)
+        if self.show_nodes:
+            self._draw_nodes(surface, camera, network, selection)
+        self._draw_preview(surface, camera, preview)
+
+    # -- the model ---------------------------------------------------------
+
+    def _draw_nodes(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        network: RoadNetwork,
+        selection: Selection,
+    ) -> None:
+        """Nodes are authoritative state, so they are always worth seeing.
+
+        A junction node is drawn larger than a plain joint - the difference is
+        the thing most worth reading at a glance.
+        """
+        for node in network.nodes.values():
+            selected = node.id == selection.node
+            color = (
+                config.Color.NODE_SELECTED if selected else config.Color.NODE_MARK
+            )
+            radius = 6 if node.degree > 2 else 4
+            pygame.draw.circle(
+                surface, color, camera.to_screen(node.position), radius, 0 if selected else 2
+            )
+
+    def _draw_control_points(
+        self, surface: pygame.Surface, camera: Camera, network: RoadNetwork
+    ) -> None:
+        for segment in network.segments.values():
+            for point in segment.control_points[1:-1]:
+                x, y = camera.to_screen(point)
+                pygame.draw.rect(
+                    surface, config.Color.HUD_DIM, pygame.Rect(x - 2, y - 2, 5, 5)
+                )
+
+    def _draw_selection(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        network: RoadNetwork,
+        selection: Selection,
+    ) -> None:
+        if selection.segment is None or selection.segment not in network.segments:
+            return
+        segment = network.segments[selection.segment]
+        points = to_screen_points(camera, segment.path.points(camera.world_tolerance))
+        if len(points) >= 2:
+            pygame.draw.lines(surface, config.Color.SELECTION, False, points, 3)
+
+    # -- the tool ----------------------------------------------------------
+
+    def _draw_preview(
+        self, surface: pygame.Surface, camera: Camera, preview: ToolPreview
+    ) -> None:
+        color = config.Color.SEGMENT_ERROR if preview.invalid else config.Color.PREVIEW
+
+        for path in preview.paths:
+            points = to_screen_points(camera, path.points(camera.world_tolerance))
+            if len(points) >= 2:
+                pygame.draw.lines(surface, color, False, points, 2)
+
+        if preview.rubber_band is not None:
+            a, b = preview.rubber_band
+            pygame.draw.line(
+                surface,
+                config.Color.PREVIEW_DIM,
+                camera.to_screen(a),
+                camera.to_screen(b),
+                1,
+            )
+
+        for point in preview.points:
+            pygame.draw.circle(surface, color, camera.to_screen(point), 4, 1)
+
+        if preview.snap is not None:
+            self._draw_snap(surface, camera, preview.snap)
+
+    def _draw_snap(self, surface: pygame.Surface, camera: Camera, snap: Snap) -> None:
+        """Each snap kind gets its own mark, so what the editor is about to do
+        is readable before the click rather than after it."""
+        color = SNAP_COLORS[snap.kind]
+        center = camera.to_screen(snap.position)
+        if snap.kind is SnapKind.NODE:
+            pygame.draw.circle(surface, color, center, 9, 2)
+        elif snap.kind is SnapKind.SEGMENT:
+            _cross(surface, color, center, 7)  # "this road will be split here"
+        elif snap.kind is SnapKind.ANGLE:
+            pygame.draw.circle(surface, color, center, 5, 1)
+            _cross(surface, color, center, 9)
+        else:
+            _plus(surface, color, center, 6)
+
+
+def _cross(surface: pygame.Surface, color, center: tuple[float, float], r: float) -> None:
+    x, y = center
+    pygame.draw.line(surface, color, (x - r, y - r), (x + r, y + r), 2)
+    pygame.draw.line(surface, color, (x - r, y + r), (x + r, y - r), 2)
+
+
+def _plus(surface: pygame.Surface, color, center: tuple[float, float], r: float) -> None:
+    x, y = center
+    pygame.draw.line(surface, color, (x - r, y), (x + r, y), 1)
+    pygame.draw.line(surface, color, (x, y - r), (x, y + r), 1)

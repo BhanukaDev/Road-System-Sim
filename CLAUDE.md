@@ -14,6 +14,7 @@ three milestones from now*, not toward the shortest path to something on screen.
 ```bash
 uv sync                     # install (pygame-ce + pytest)
 uv run road-sim             # launch, default scene
+uv run road-sim --scene network   # hardcoded showcase
 uv run road-sim --scene debug
 uv run pytest               # full suite
 uv run pytest tests/test_arc.py -v
@@ -24,9 +25,10 @@ uv run pytest tests/test_arc.py -v
 ```
 src/roadsim/
   geometry/   pure maths: vec, curve, line, arc, path, fitting, ribbon
-  road/       (M2) lanes, profiles, nodes, segments, junctions, network
-  render/     camera, grid, curve drawing, HUD
-  editor/     (M2) tools, commands/undo, snapping
+  road/       lanes, profiles, nodes, segments, junctions, network
+  render/     camera, grid, curve drawing, network renderer, HUD
+  editor/     commands/undo, snapping, tools, overlay
+  serialization/  versioned JSON schema and file io
   scenes/     one Scene subclass per mode, registered in scenes/__init__.py
   config.py   tunables and palette - no magic numbers elsewhere
   app.py      window, loop, camera controls shared by every scene
@@ -36,10 +38,11 @@ tests/        pytest, geometry-focused
 
 ## The rules that keep this from becoming one big file
 
-1. **Layering is one-directional.** `geometry` knows nothing about roads.
-   `road` knows nothing about pygame. `render` and `editor` both sit above
-   `road` and know nothing about *each other*. A renderer never mutates the
-   model; a tool never blits.
+1. **Layering is one-directional:** `geometry` -> `road` -> `render` ->
+   `editor`. `geometry` knows nothing about roads; `road` knows nothing about
+   pygame; `render` knows nothing about the editor. A renderer never mutates the
+   model, and a tool never blits - a tool returns a `ToolPreview` and
+   `editor/overlay.py` is the only thing in `editor` that draws (D8).
 2. **New behaviour is a new file plus one registry line**, never an `if` branch
    in something large. Tools register in `editor/toolbox.py`, scenes in
    `scenes/__init__.py`, lane types in `road/lane.py`.
@@ -80,6 +83,16 @@ Keep new geometry work visible there.
 
 ## Status
 
-M0 scaffolding and M1 geometry kernel are **done**. M2 (network + editor) is
-next - see `docs/milestone-2-network-and-editor.md` for the design, and
+M0, M1 and **M2 are done**: the geometry kernel, `road/` (profiles, segments,
+network, derived junctions), the network renderer, `serialization/`, and
+`editor/` (commands with undo, snapping, four tools). `editor` is the default
+scene; `--scene network` shows the hardcoded showcase and `--scene debug` M1's
+geometry surface.
+
+M3 (textures and markings) is next - see `docs/roadmap.md`. It also owes M2 two
+things: exact curve-curve junction intersection in place of the straight-ray
+approximation and its trim cap, and splitting a road where a new one *crosses*
+it rather than only where it ends on it.
+
+See `docs/milestone-2-network-and-editor.md` for the M2 design and
 `docs/decisions.md` for why things are the way they are.

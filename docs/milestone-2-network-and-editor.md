@@ -14,15 +14,24 @@ polygons - textures are M3.
 Each step should leave the app runnable. Do not build the editor before the
 model is right.
 
-1. `road/lane.py`, `road/profile.py` + tests, + profile presets in `data/profiles/`
-2. `road/node.py`, `road/segment.py`, `road/network.py` + tests
-3. `render/lane_style.py`, `render/network_renderer.py`, and a scene that draws
-   a **hardcoded** network - prove profiles render before adding tools
-4. `road/junction.py` + trimming, wired into `network.rebuild_dirty()`
-5. `serialization/` + round-trip tests
-6. `editor/commands.py` + history, then `editor/tool.py` / `toolbox.py` /
-   `snapping.py`, then the tools one at a time
-7. `scenes/editor.py`, made the default scene
+1. ~~`road/lane.py`, `road/profile.py` + tests, + profile presets~~ **done** -
+   presets landed in `road/presets.py` as data rather than `data/profiles/*.json`,
+   because the JSON loader is step 5; moving them out is a loader, not a rewrite
+2. ~~`road/node.py`, `road/segment.py`, `road/network.py` + tests~~ **done**
+3. ~~`render/lane_style.py`, `render/network_renderer.py`, and a scene that draws
+   a **hardcoded** network~~ **done** - `scenes/network_demo.py`
+4. ~~`road/junction.py` + trimming, wired into `network.rebuild_dirty()`~~ **done**
+5. ~~`serialization/` + round-trip tests~~ **done**
+6. ~~`editor/commands.py` + history, then `editor/tool.py` / `toolbox.py` /
+   `snapping.py`, then the tools one at a time~~ **done**
+7. ~~`scenes/editor.py`, made the default scene~~ **done**
+
+**All seven done.** Two deviations from this design, both deliberate:
+
+- `render/editor_overlay.py` is `editor/overlay.py`, and `Tool.draw_preview`
+  is `Tool.preview() -> ToolPreview`. See D8 - the layering here was circular as
+  written, and the fix makes every tool testable without a window.
+- pair trim demand is capped (see the junction section below).
 
 ---
 
@@ -151,6 +160,15 @@ rather than the real curves. Roads are near-straight at their ends anyway -
 fillet clamping caps each corner at half its straight, so every segment keeps
 some straight run at each end. Exact curve-curve intersection is M3. Leave a
 comment saying so.
+
+**The cap this needs (found while building the editor).** As two arms approach
+collinear their kerbs approach parallel, so the crossing point runs off toward
+infinity: drag a node until two roads leave at a shallow angle and the junction
+inflates until it swallows the roads feeding it. Exactly parallel is already
+handled (no intersection); *nearly* parallel is the dangerous case. Each pair
+demand is therefore capped at `JUNCTION_MAX_TRIM_FACTOR` times the widest arm's
+half-width, which leaves a shallow corner blunt instead of infinite. M3's corner
+fillets retire the cap along with the approximation it patches.
 
 Cases to handle: dead end (1 end, no trim, flat cap); 2 ends with the same
 profile (no junction, roads simply meet); 2 ends with different profiles (M2:
