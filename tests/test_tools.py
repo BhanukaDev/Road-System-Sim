@@ -19,7 +19,11 @@ from roadsim.editor.tools.select import pick
 from roadsim.geometry import Vec2
 from roadsim.render.camera import Camera
 from roadsim.road.network import RoadNetwork
-from roadsim.road.presets import ONE_WAY_TWO_LANE, RESIDENTIAL_TWO_WAY, TRAM_AVENUE
+from roadsim.road.presets import (
+    ASYMMETRIC_BOULEVARD,
+    ONE_WAY_TWO_LANE,
+    RESIDENTIAL_TWO_WAY,
+)
 from roadsim.serialization import dumps
 
 from .conftest import approx, assert_vec
@@ -54,9 +58,9 @@ def test_drawing_in_open_space_creates_both_nodes_and_one_road(ctx):
 
 
 def test_drawing_uses_the_active_profile(ctx):
-    ctx.profile_index = ctx.profile_names.index(TRAM_AVENUE.name)
+    ctx.profile_index = ctx.profile_names.index(ASYMMETRIC_BOULEVARD.name)
     draw(ctx, [Vec2(-40.0, 60.0), Vec2(40.0, 60.0)])
-    assert ctx.network.segments[2].profile is TRAM_AVENUE
+    assert ctx.network.segments[2].profile is ASYMMETRIC_BOULEVARD
 
 
 def test_drawing_from_an_existing_node_reuses_it(ctx):

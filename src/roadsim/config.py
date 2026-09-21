@@ -64,6 +64,16 @@ DIRECTION_ARROW_MIN_PX = 26.0
 STOP_LINE_WIDTH_PX = 3.0
 """Thickness of a terminal cap's stop line, in screen pixels."""
 
+MARKING_WIDTH_PX = 2.0
+"""Thickness of a lane marking line, in screen pixels."""
+MARKING_DASH_LENGTH = 3.0
+"""Metres of paint in one dash of a lane divider."""
+MARKING_GAP_LENGTH = 5.0
+"""Metres of gap between dashes."""
+MARKING_MIN_PX = 20.0
+"""Below this on-screen carriageway length, markings are skipped rather than
+crammed - the same reasoning as `DIRECTION_ARROW_MIN_PX`."""
+
 PAN_KEY_SPEED_PX = 900.0
 """Keyboard and screen-edge pan speed, in *pixels* per second, converted to
 metres through `camera.zoom`. Pixels rather than metres for the same reason snap
@@ -136,10 +146,10 @@ class Color:
     LANE_EDGE = (44, 46, 52)
 
     JUNCTION_FILL = (52, 55, 62)
-    JUNCTION_EDGE = (44, 46, 52)
     CAP_FILL = (52, 55, 62)
-    CAP_EDGE = (44, 46, 52)
     STOP_LINE = (226, 226, 230)
+    MARKING_WHITE = (222, 222, 216)
+    MARKING_YELLOW = (224, 178, 60)
     DIRECTION_ARROW = (150, 156, 168)
     SEGMENT_ERROR = (198, 72, 64)
     NODE_MARK = (226, 168, 72)

@@ -47,6 +47,10 @@ class GameScene(Scene):
             network if network is not None else build_demo_network(), camera
         )
         self.renderer = NetworkRenderer()
+        self.arrows_enabled = True
+        """[F4] preference. Combined with the active mode's own `show_arrows` -
+        view mode never shows arrows regardless, since they read as an editing
+        aid rather than gameplay."""
         self.modes = ModeBox(
             [cls() for cls in MODES],
             self.ctx,
@@ -126,7 +130,7 @@ class GameScene(Scene):
         if event.key in (pygame.K_DELETE, pygame.K_x):
             return self._delete_selection()
         if event.key == pygame.K_F4:
-            self.renderer.show_arrows = not self.renderer.show_arrows
+            self.arrows_enabled = not self.arrows_enabled
             return True
         return False
 
@@ -168,6 +172,9 @@ class GameScene(Scene):
         self.ctx.network.rebuild_dirty()
 
     def draw(self, surface: pygame.Surface) -> None:
+        self.renderer.show_arrows = (
+            self.arrows_enabled and self.modes.active.show_arrows
+        )
         self.renderer.draw(surface, self.camera, self.ctx.network)
         self.modes.active.draw(surface, self.camera, self.ctx)
         self.ui.layout(self.camera.viewport)

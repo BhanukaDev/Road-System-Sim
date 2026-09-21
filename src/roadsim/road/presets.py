@@ -15,6 +15,8 @@ from .profile import RoadProfile
 # rather than as a column of numbers.
 SIDEWALK = 2.0
 CAR = 3.5
+ALLEY_LANE = 3.0
+PARKING = 2.2
 MEDIAN = 2.0
 TRAM = 3.0
 RAIL = 3.0
@@ -26,6 +28,13 @@ _B, _F, _2, _0 = Direction.BACKWARD, Direction.FORWARD, Direction.BOTH, Directio
 def _p(name: str, *lanes: LaneSpec, datum: float = 0.0) -> RoadProfile:
     return RoadProfile(name, tuple(lanes), datum)
 
+
+ALLEY = _p(
+    "alley",
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+    LaneSpec(ALLEY_LANE, _2, LaneType.CAR, 20.0),
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+)
 
 RESIDENTIAL_TWO_WAY = _p(
     "residential_two_way",
@@ -43,6 +52,16 @@ ONE_WAY_TWO_LANE = _p(
     LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
 )
 
+PARKING_STREET = _p(
+    "parking_street",
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+    LaneSpec(PARKING, _0, LaneType.PARKING),
+    LaneSpec(CAR, _B, LaneType.CAR, 40.0),
+    LaneSpec(CAR, _F, LaneType.CAR, 40.0),
+    LaneSpec(PARKING, _0, LaneType.PARKING),
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+)
+
 ASYMMETRIC_BOULEVARD = _p(
     "asymmetric_boulevard",
     LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
@@ -53,6 +72,29 @@ ASYMMETRIC_BOULEVARD = _p(
     LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
 )
 
+AVENUE_FOUR_LANE = _p(
+    "avenue_four_lane",
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+    LaneSpec(CAR, _B, LaneType.CAR, 60.0),
+    LaneSpec(CAR, _B, LaneType.CAR, 60.0),
+    LaneSpec(MEDIAN, _0, LaneType.MEDIAN),
+    LaneSpec(CAR, _F, LaneType.CAR, 60.0),
+    LaneSpec(CAR, _F, LaneType.CAR, 60.0),
+    LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
+)
+
+HIGHWAY_THREE_LANE = _p(
+    "highway_three_lane",
+    LaneSpec(SHOULDER, _0, LaneType.SHOULDER),
+    LaneSpec(CAR, _F, LaneType.CAR, 100.0),
+    LaneSpec(CAR, _F, LaneType.CAR, 100.0),
+    LaneSpec(CAR, _F, LaneType.CAR, 100.0),
+    LaneSpec(SHOULDER, _0, LaneType.SHOULDER),
+)
+
+# Rail and tram are kept as real profiles for tests and future milestones, but
+# are pulled out of `PROFILES` for now - no track lanes on offer until the
+# texturing they need (sleepers, grooves) lands.
 TRAM_AVENUE = _p(
     "tram_avenue",
     LaneSpec(SIDEWALK, _0, LaneType.SIDEWALK),
@@ -73,11 +115,13 @@ RAIL_DOUBLE = _p(
 PROFILES: dict[str, RoadProfile] = {
     p.name: p
     for p in (
+        ALLEY,
         RESIDENTIAL_TWO_WAY,
         ONE_WAY_TWO_LANE,
+        PARKING_STREET,
         ASYMMETRIC_BOULEVARD,
-        TRAM_AVENUE,
-        RAIL_DOUBLE,
+        AVENUE_FOUR_LANE,
+        HIGHWAY_THREE_LANE,
     )
 }
 

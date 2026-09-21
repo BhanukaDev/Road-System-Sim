@@ -25,7 +25,6 @@ def draw_junction(surface: pygame.Surface, camera: Camera, junction: Junction) -
         return
     points = to_screen_points(camera, outline)
     pygame.draw.polygon(surface, config.Color.JUNCTION_FILL, points)
-    pygame.draw.polygon(surface, config.Color.JUNCTION_EDGE, points, 1)
 
 
 def draw_pavement_band(
@@ -54,7 +53,6 @@ def draw_pavement_band(
     if len(points) < 3:
         return
     pygame.draw.polygon(surface, config.Color.LANE_SIDEWALK, points)
-    pygame.draw.polygon(surface, config.Color.LANE_EDGE, points, 1)
 
 
 def _rounded_outline(junction: Junction, tolerance: float) -> list[Vec2]:

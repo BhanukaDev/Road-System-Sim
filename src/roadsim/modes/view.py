@@ -23,6 +23,7 @@ from .base import Mode
 class ViewMode(Mode):
     name = "view"
     hint = "look around   click to inspect a road or node   nothing here edits"
+    show_arrows = False
 
     def __init__(self) -> None:
         self.hover: Selection = Selection()
@@ -52,7 +53,11 @@ class ViewMode(Mode):
             pygame.draw.lines(surface, config.Color.UI_ACCENT, False, points, 2)
 
     def widgets(self, ctx: EditorContext) -> list[Widget]:
-        return [Panel(lambda: self._details(ctx), title="under the cursor", anchor_right=True)]
+        return [
+            Panel(
+                lambda: self._details(ctx), title="under the cursor", anchor_right=True
+            )
+        ]
 
     def _details(self, ctx: EditorContext) -> list[str]:
         if self.hover.is_empty:

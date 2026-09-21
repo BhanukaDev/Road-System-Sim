@@ -1,9 +1,10 @@
 """Draws a `RoadNetwork`. Read-only: a renderer never mutates the model.
 
-Order matters and is fixed here: lane ribbons bottom-up by layer, then junction
-surfaces filling the gaps the trims opened, then direction arrows on top. Lane
-colours are not decided here - `lane_style.py` owns that mapping, so a new lane
-type never touches this file.
+Order matters and is fixed here: lane ribbons bottom-up by layer, then lane
+markings on top of them, then junction surfaces filling the gaps the trims
+opened, then direction arrows on top of that. Lane colours are not decided
+here - `lane_style.py` owns that mapping, so a new lane type never touches
+this file.
 
 Every ribbon is built at `camera.world_tolerance`, so the geometry gets finer as
 you zoom in and cheaper as you zoom out (D7).
@@ -22,6 +23,7 @@ from ..road.pavement import build_pavement_bands
 from .camera import Camera
 from .curves import to_screen_points
 from .junction_renderer import draw_junction, draw_pavement_band
+from .lane_markings import draw_markings
 from .lane_style import LAYERS, style_for
 
 
@@ -37,6 +39,16 @@ class NetworkRenderer:
         for layer in LAYERS:
             for segment in drawable:
                 self._draw_lanes(surface, camera, segment, layer)
+
+        for segment in drawable:
+            draw_markings(
+                surface,
+                camera,
+                segment.path,
+                segment.profile,
+                segment.trim_a,
+                segment.path.length - segment.trim_b,
+            )
 
         for junction in network.junctions.values():
             draw_junction(surface, camera, junction)
@@ -78,8 +90,6 @@ class NetworkRenderer:
             if len(outline) < 3:
                 continue
             pygame.draw.polygon(surface, style.fill, outline)
-            if style.edge is not None:
-                pygame.draw.polygon(surface, style.edge, outline, 1)
 
     def _draw_cap(self, surface: pygame.Surface, camera: Camera, cap: Cap) -> None:
         if cap.kind is CapKind.TERMINAL:
@@ -100,7 +110,6 @@ class NetworkRenderer:
         if len(points) < 3:
             return
         pygame.draw.polygon(surface, config.Color.CAP_FILL, points)
-        pygame.draw.polygon(surface, config.Color.CAP_EDGE, points, 1)
 
     def _draw_arrows(
         self, surface: pygame.Surface, camera: Camera, segment: RoadSegment

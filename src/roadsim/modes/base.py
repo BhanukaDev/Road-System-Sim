@@ -27,6 +27,9 @@ from ..ui.widget import Widget
 class Mode(ABC):
     name: str = "mode"
     hint: str = ""
+    show_arrows: bool = True
+    """Whether the network renderer's direction arrows belong in this mode.
+    `ViewMode` turns them off - they read as an editing aid, not gameplay."""
 
     def enter(self, ctx: EditorContext) -> None:
         """Becoming active. Set up anything this mode needs."""

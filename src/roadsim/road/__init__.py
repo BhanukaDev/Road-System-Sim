@@ -8,6 +8,7 @@ from .anchor import Anchor, end_anchors, node_anchors
 from .cap import Cap, CapKind, build_cap
 from .junction import Junction, SegmentEnd, build_junction
 from .lane import Direction, LaneSpec, LaneType
+from .markings import LaneMarking, MarkingKind, lane_markings
 from .network import RoadNetwork
 from .node import RoadNode
 from .pavement import PavementBand, build_pavement_bands
@@ -23,8 +24,10 @@ __all__ = [
     "CapKind",
     "Direction",
     "Junction",
+    "LaneMarking",
     "LaneSpec",
     "LaneType",
+    "MarkingKind",
     "PavementBand",
     "RoadNetwork",
     "RoadNode",
@@ -35,5 +38,6 @@ __all__ = [
     "build_junction",
     "build_pavement_bands",
     "end_anchors",
+    "lane_markings",
     "node_anchors",
 ]

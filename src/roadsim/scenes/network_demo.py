@@ -18,11 +18,13 @@ from .. import config
 from ..geometry import Vec2
 from ..road import RoadNetwork
 from ..road.presets import (
+    ALLEY,
     ASYMMETRIC_BOULEVARD,
+    AVENUE_FOUR_LANE,
+    HIGHWAY_THREE_LANE,
     ONE_WAY_TWO_LANE,
-    RAIL_DOUBLE,
+    PARKING_STREET,
     RESIDENTIAL_TWO_WAY,
-    TRAM_AVENUE,
 )
 from ..render import curves
 from ..render.camera import Camera
@@ -35,11 +37,11 @@ def build_demo_network() -> RoadNetwork:
     net = RoadNetwork()
     origin = Vec2(0.0, 0.0)
 
-    # A four-way crossing at the origin: a tram avenue crossed by a residential
-    # road. Different widths on purpose - the wider road must force the larger
-    # trim on the narrower one.
-    net.connect(Vec2(-95.0, 0.0), origin, TRAM_AVENUE)
-    net.connect(origin, Vec2(100.0, 22.0), TRAM_AVENUE, via=[Vec2(55.0, 0.0)])
+    # A four-way crossing at the origin: a four-lane avenue crossed by a
+    # residential road. Different widths on purpose - the wider road must force
+    # the larger trim on the narrower one.
+    net.connect(Vec2(-95.0, 0.0), origin, AVENUE_FOUR_LANE)
+    net.connect(origin, Vec2(100.0, 22.0), AVENUE_FOUR_LANE, via=[Vec2(55.0, 0.0)])
     net.connect(Vec2(0.0, -80.0), origin, RESIDENTIAL_TWO_WAY)
     net.connect(origin, Vec2(-28.0, 85.0), RESIDENTIAL_TWO_WAY, via=[Vec2(0.0, 48.0)])
 
@@ -56,9 +58,17 @@ def build_demo_network() -> RoadNetwork:
 
     # Two profiles meeting end to end, and a pair of dead ends to check the
     # flat caps an untrimmed end gets.
-    net.connect(Vec2(-160.0, 60.0), Vec2(-70.0, 130.0), RAIL_DOUBLE, via=[Vec2(-120.0, 120.0)])
-    net.connect(Vec2(120.0, 95.0), Vec2(40.0, 95.0), ONE_WAY_TWO_LANE)
+    net.connect(
+        Vec2(-160.0, 60.0),
+        Vec2(-70.0, 130.0),
+        HIGHWAY_THREE_LANE,
+        via=[Vec2(-120.0, 120.0)],
+    )
+    net.connect(Vec2(120.0, 95.0), Vec2(40.0, 95.0), PARKING_STREET)
     net.connect(Vec2(40.0, 95.0), Vec2(-20.0, 118.0), RESIDENTIAL_TWO_WAY)
+
+    # A narrow alley - the other end of the width range from the avenue above.
+    net.connect(Vec2(-160.0, -30.0), Vec2(-110.0, -55.0), ALLEY)
 
     net.rebuild_all()
     return net
