@@ -103,11 +103,12 @@ def build_junction(
         return None
 
     seg_by_key = {(seg.id, at_a): seg for seg, at_a in segments}
-    demand, corner_geoms = _solve_trims(ends, seg_by_key, position)
+    demand, corners = _solve_trims(ends, seg_by_key, position)
     lookup = {(seg.id, at_a): demand[(seg.id, at_a)] for seg, at_a in segments}
     polygon = _polygon(ends, segments, lookup)
-    corners = _build_corners(corner_geoms, lookup, seg_by_key)
-    return Junction(node_id, position, tuple(ends), lookup, polygon, corners)
+    return Junction(
+        node_id, position, tuple(ends), lookup, polygon, tuple(corners)
+    )
 
 
 def _angle_key(end: SegmentEnd) -> tuple[float, int, bool]:
@@ -136,31 +137,38 @@ def _solve_trims(
     ends: list[SegmentEnd],
     seg_by_key: dict[tuple[int, bool], RoadSegment],
     node_position: Vec2,
-) -> tuple[dict[tuple[int, bool], float], list[tuple[Vec2, SegmentEnd, SegmentEnd] | None]]:
+) -> tuple[dict[tuple[int, bool], float], list[Fillet | None]]:
     """Each end pulls back far enough to clear every neighbour it shares a
     corner with, and never less than its own half-width.
 
-    Alongside the trims, this returns the corner apex and the two ends either
-    side of it for every CCW-adjacent pair - the geometry `_build_corners`
-    needs to round each one, computed once rather than twice.
+    The corner fillet is solved here too, because the trim *depends on it*: an
+    arc tangent to both kerbs touches them at `tangent_length` **beyond** the
+    point where those kerbs cross, so an end that stopped at the crossing would
+    leave its mouth short of where the corner starts - the junction surface
+    bulging past the mouth, and a pavement band floating off the kerb it is
+    meant to continue. The trim is therefore `reach + tangent_length`, and the
+    corner arc lands exactly on the mouth it was solved with.
     """
     n = len(ends)
     demand = {(e.segment_id, e.at_a): e.half_width for e in ends}
-    corner_geoms: list[tuple[Vec2, SegmentEnd, SegmentEnd] | None] = [None] * n
+    corners: list[Fillet | None] = [None] * n
     for i, a in enumerate(ends):
         b = ends[(i + 1) % n]
         if a is b:
             continue
-        seg_a, seg_b = seg_by_key[(a.segment_id, a.at_a)], seg_by_key[(b.segment_id, b.at_a)]
+        seg_a, seg_b = (
+            seg_by_key[(a.segment_id, a.at_a)],
+            seg_by_key[(b.segment_id, b.at_a)],
+        )
         result = _pair_demand(a, b, seg_a, seg_b, node_position)
         if result is None:
             continue
-        apex, reach_a, reach_b = result
+        fillet, reach_a, reach_b = result
         key_a, key_b = (a.segment_id, a.at_a), (b.segment_id, b.at_a)
         demand[key_a] = max(demand[key_a], reach_a)
         demand[key_b] = max(demand[key_b], reach_b)
-        corner_geoms[i] = (apex, a, b)
-    return demand, corner_geoms
+        corners[i] = fillet
+    return demand, corners
 
 
 def _pair_demand(
@@ -169,9 +177,8 @@ def _pair_demand(
     seg_a: RoadSegment,
     seg_b: RoadSegment,
     node_position: Vec2,
-) -> tuple[Vec2, float, float] | None:
-    """Where `a`'s left kerb and `b`'s right kerb actually meet, and how far
-    back each must pull to clear it.
+) -> tuple[Fillet | None, float, float] | None:
+    """The corner between `a` and `b`, and how far back each end must pull.
 
     `b` is the next end counter-clockwise, so it sits to `a`'s left: the corner
     between them is bounded by `a`'s left edge and `b`'s right edge.
@@ -181,8 +188,10 @@ def _pair_demand(
     starting right at the node trims against its real shape instead of the line
     it left on. The tangent-ray version survives only as the fallback for when
     the exact kerbs do not cross nearby: two arms at a shallow angle have kerbs
-    that run close to parallel, and a corner handle's pull overrides either
-    side outright regardless of where the kerbs meet.
+    that run close to parallel.
+
+    Both ends then pull back past that crossing by the fillet's tangent length,
+    so the mouth lands where the corner arc leaves the kerb.
     """
     apex = _exact_apex(seg_a, a, seg_b, b, node_position)
     if apex is None:
@@ -199,16 +208,45 @@ def _pair_demand(
     reach_a = min(_reach(seg_a, a.at_a, apex), limit)
     reach_b = min(_reach(seg_b, b.at_a, apex), limit)
 
+    into, out_of = -a.outgoing_dir, b.outgoing_dir
     pull_a, pull_b = seg_a.pull_at(a.at_a), seg_b.pull_at(b.at_a)
-    if pull_a is not None:
-        reach_a = max(pull_a, a.half_width)
-    if pull_b is not None:
-        reach_b = max(pull_b, b.half_width)
-    return apex, reach_a, reach_b
+    radius = _target_radius(deflection(into, out_of), pull_a, pull_b)
+    fillet = corner_fillet(
+        apex,
+        into,
+        out_of,
+        radius,
+        _room(seg_a, a, reach_a, limit),
+        _room(seg_b, b, reach_b, limit),
+    )
+    tangent = 0.0 if fillet is None else fillet.tangent_length(apex)
+    return (
+        fillet,
+        max(reach_a + tangent, a.half_width),
+        max(reach_b + tangent, b.half_width),
+    )
+
+
+def _room(
+    segment: RoadSegment, end: SegmentEnd, reach: float, limit: float
+) -> float:
+    """How much kerb this arm can still give a corner past the kerb crossing.
+
+    Bounded twice: by the end piece the kerb was taken from, so a fillet never
+    runs tangent to a straight that has already turned into an arc, and by the
+    same max-trim budget that caps `reach` - which is what keeps the total
+    trim, `reach + tangent_length`, inside that budget too.
+    """
+    piece = segment.path.pieces[0] if end.at_a else segment.path.pieces[-1]
+    return max(0.0, min(piece.length, limit) - reach)
 
 
 def _exact_apex(
-    seg_a: RoadSegment, a: SegmentEnd, seg_b: RoadSegment, b: SegmentEnd, node_position: Vec2
+    seg_a: RoadSegment,
+    a: SegmentEnd,
+    seg_b: RoadSegment,
+    b: SegmentEnd,
+    node_position: Vec2,
 ) -> Vec2 | None:
     """The real crossing of `a`'s left kerb and `b`'s right kerb, or `None` when
     there is none nearby - parallel-enough kerbs, or a kerb offset that would
@@ -258,38 +296,16 @@ def _reach(segment: RoadSegment, at_a: bool, point: Vec2) -> float:
     return s_local if at_a else piece.length - s_local
 
 
-def _build_corners(
-    corner_geoms: list[tuple[Vec2, SegmentEnd, SegmentEnd] | None],
-    trims: dict[tuple[int, bool], float],
-    seg_by_key: dict[tuple[int, bool], RoadSegment],
-) -> tuple[Fillet | None, ...]:
-    """One fillet per corner, tangent to both kerbs and clamped by whichever
-    arm has the less straight kerb to give (item 8: "clamped by the corner
-    angle" falls out of `corner_fillet` itself, since a sharper turn eats more
-    straight at any given radius)."""
-    corners: list[Fillet | None] = []
-    for geom in corner_geoms:
-        if geom is None:
-            corners.append(None)
-            continue
-        apex, a, b = geom
-        into, out_of = -a.outgoing_dir, b.outgoing_dir
-        pull_a = seg_by_key[(a.segment_id, a.at_a)].pull_at(a.at_a)
-        pull_b = seg_by_key[(b.segment_id, b.at_a)].pull_at(b.at_a)
-        radius = _target_radius(deflection(into, out_of), pull_a, pull_b)
-        room_in = trims[(a.segment_id, a.at_a)]
-        room_out = trims[(b.segment_id, b.at_a)]
-        corners.append(corner_fillet(apex, into, out_of, radius, room_in, room_out))
-    return tuple(corners)
-
-
 def _target_radius(phi: float, pull_a: float | None, pull_b: float | None) -> float:
     """A corner handle's pull is a tangent length (item 7): the distance back
     from the corner, not a radius. `radius * tan(phi / 2) == tangent_length` is
     `corner_fillet`'s own formula, inverted here so a pull sets both together -
-    drag the handle out and the radius grows to match, exactly."""
+    drag the handle out and the radius grows to match, and the mouth pulls back
+    with it, since the trim follows the tangent length."""
     half = math.tan(phi / 2.0)
-    candidates = [pull / half for pull in (pull_a, pull_b) if pull is not None and half > 1e-9]
+    candidates = [
+        pull / half for pull in (pull_a, pull_b) if pull is not None and half > 1e-9
+    ]
     return min(candidates) if candidates else config.JUNCTION_CORNER_RADIUS
 
 

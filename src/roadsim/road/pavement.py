@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..geometry import ArcSegment, DegenerateOffsetError, Vec2
+from ..geometry import ArcSegment, Vec2
 from .junction import Junction, SegmentEnd
 from .lane import LaneType
 from .segment import RoadSegment
@@ -57,13 +57,13 @@ def build_pavement_bands(
                 )
             )
             continue
-        try:
-            # The fillet runs along the outer kerb. A sidewalk continues from
-            # that kerb towards the carriageway, so its companion arc must be
-            # concentric on the smaller radius, not outside the road.
-            inner = fillet.arc.offset(min(width_a, width_b) * fillet.arc.turn_sign)
-        except DegenerateOffsetError:
-            continue
+        # The fillet runs along the *outer* edge of the footway, and its centre
+        # sits out in the corner the roads leave empty - so the edge towards the
+        # carriageway is the concentric arc one width *further* from that centre,
+        # never the smaller one. `offset` shifts left, which is towards the
+        # centre on this arc, hence the flipped sign; the radius only grows, so
+        # this can never collapse.
+        inner = fillet.arc.offset(-min(width_a, width_b) * fillet.arc.turn_sign)
         bands.append(
             PavementBand(
                 junction.node_id,

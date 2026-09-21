@@ -28,7 +28,9 @@ def draw_junction(surface: pygame.Surface, camera: Camera, junction: Junction) -
     pygame.draw.polygon(surface, config.Color.JUNCTION_EDGE, points, 1)
 
 
-def draw_pavement_band(surface: pygame.Surface, camera: Camera, band: PavementBand) -> None:
+def draw_pavement_band(
+    surface: pygame.Surface, camera: Camera, band: PavementBand
+) -> None:
     tolerance = camera.world_tolerance
     curb = (
         []

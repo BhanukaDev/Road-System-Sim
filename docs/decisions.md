@@ -34,7 +34,7 @@ sketch comes out as ~19 alternating line/arc pieces and reads as a real road.
 The tension between "organic" and "arc + line" turned out not to bite.
 
 **If you ever need true splines** (a rail easement, say), add a `Curve`
-subclass. Nothing above the kernel cares, *provided* `sample(s)` stays
+subclass. Nothing above the kernel cares, _provided_ `sample(s)` stays
 arc-length correct and `offset(d)` is honest about its error.
 
 ---
@@ -70,17 +70,17 @@ left and lane profiles are ordered left-to-right.
 A `RoadProfile` is just `LaneSpec`s left to right. Every case in the brief falls
 out with no special-casing:
 
-| Case | Profile |
-|---|---|
-| Two-way | `[BACKWARD, FORWARD]` |
-| One-way | `[FORWARD, FORWARD]` - no backward lanes exist |
-| Asymmetric | unequal counts or widths, or a sidewalk on one side only |
-| Tram in road | a `TRAM` lane between `CAR` lanes |
-| Rail line | only `RAIL` lanes |
+| Case         | Profile                                                  |
+| ------------ | -------------------------------------------------------- |
+| Two-way      | `[BACKWARD, FORWARD]`                                    |
+| One-way      | `[FORWARD, FORWARD]` - no backward lanes exist           |
+| Asymmetric   | unequal counts or widths, or a sidewalk on one side only |
+| Tram in road | a `TRAM` lane between `CAR` lanes                        |
+| Rail line    | only `RAIL` lanes                                        |
 
 The alternative - `is_oneway`, `has_tram`, `lanes_left`, `lanes_right` flags -
 collapses the moment you want a tram lane between two car lanes, or a bus lane on
-one side. Adding a lane *type* must never require a new field.
+one side. Adding a lane _type_ must never require a new field.
 
 **The datum** records where the profile's centre sits relative to the
 centreline, so a road can be widened on one side without moving its centreline
@@ -97,7 +97,7 @@ Storing junctions means every node drag, profile change and road split has to
 remember to invalidate them - and one missed invalidation is a corrupt network
 that saves to disk. Deriving costs a rebuild; storing costs correctness.
 
-Lane-to-lane *connections* inside a junction (M4) are different: those carry user
+Lane-to-lane _connections_ inside a junction (M4) are different: those carry user
 intent ("no left turn here") and **will** be stored, in a separate module, keyed
 so geometry rebuilds cannot silently discard them.
 
@@ -137,7 +137,7 @@ That rule could not survive contact with an editor. Two things break it:
   `Snapper` needs `camera.zoom`, and `Camera` lives in `render`.
 - **The editor overlay draws editor state** - selection, snap marks, the
   in-progress road. Whichever package it lives in depends on the other, so
-  "neither knows the other" is not available; only the *direction* is.
+  "neither knows the other" is not available; only the _direction_ is.
 
 So the layering is a straight line: `geometry` -> `road` -> `render` -> `editor`.
 `render` imports nothing from `editor`; the M2 sketch's
@@ -175,7 +175,7 @@ never calling `apply()`. The alternative - a state object per mode - raises the
 question of which one owns the network the moment there are two, and there is only
 one right answer to that. `EditorContext` already carries exactly the set every
 mode needs (network, camera, history, snapper, selection, cursor, status, active
-profile), so the name now means *the session*. Renaming it would be churn across
+profile), so the name now means _the session_. Renaming it would be churn across
 every tool and test for nothing.
 
 **Event order, first consumer wins:** window, then `UiScreen`, then scene-level
@@ -195,14 +195,14 @@ the bars against the registries, so a hardcoded button list fails the suite.
 
 ---
 
-## D10. Camera *control* is a controller, not an event ladder
+## D10. Camera _control_ is a controller, not an event ladder
 
 **What this replaces:** pan and zoom wired directly into `app.py`'s event loop.
 
 Two things were wrong with that, and only one of them was visible. The visible one
 was the bindings - middle-drag alone, which on a trackpad reads as panning being
 broken. The other was that a drag has **state**, and state only cleared by a
-`MOUSEBUTTONUP` *inside* the window gets stuck: release off-window or alt-tab
+`MOUSEBUTTONUP` _inside_ the window gets stuck: release off-window or alt-tab
 mid-drag and the camera panned forever afterwards.
 
 `CameraController` lives in `render/` because it knows only `Camera` and pygame,
@@ -223,20 +223,20 @@ keys, the screen edge and middle-drag cover it without touching a tool's button.
 
 ## D11. A curve intersection is a `Hit` with an arc length on both curves
 
-M2 approximated junction trimming by crossing the straight tangent *rays* at a
+M2 approximated junction trimming by crossing the straight tangent _rays_ at a
 node, and capped the result because nearly-parallel kerbs cross near infinity.
 Exact curve-curve intersection retires both, and four other features turned out to
 need the same primitive: detecting that a new road crosses an existing one,
 refusing a road that overlaps itself, rounding a junction corner, and collision
 detection generally. So it is one module, built alone, before any consumer.
 
-**Both arc lengths, always.** A crossing is a place to *split* a road, and a split
+**Both arc lengths, always.** A crossing is a place to _split_ a road, and a split
 needs `s`. That the point agrees from either parameterisation is the module's
 central invariant, asserted at `EXACT`.
 
 **Containment goes through `ArcSegment.s_at_angle`, never `project`.** `project`
 clamps to the nearer endpoint - so asking it whether a point lies on an arc reports
-every point past the end as lying *at* the end. Used for containment it turns
+every point past the end as lying _at_ the end. Used for containment it turns
 "these curves do not meet" into "they meet at the corner", which is a plausible
 junction in the wrong place rather than a visible failure. This is the single most
 likely bug in anything built on this module.
@@ -254,7 +254,7 @@ its sweep actually covers.
 
 ## D12. A junction corner is filleted, and a corner handle is a tangent length
 
-M2 trimmed a junction against the straight tangent *rays* at a node, capped
+M2 trimmed a junction against the straight tangent _rays_ at a node, capped
 against a shallow angle's crossing running off toward infinity, and left every
 corner between two arms a flat cut. D11's exact curve intersection retires the
 first part: `_pair_demand` now crosses each arm's own end piece, offset out to
@@ -267,27 +267,39 @@ from swallowing the roads feeding it.
 **The corner itself is filleted with the same `corner_fillet` `fit_polyline`
 already uses** - one function, three callers, so a lane edge, a drawn road's
 corner and a junction's corner are tangent to their straights by the same
-closed-form arithmetic. The room each side can give is its own final trim, so
-the same clamp that keeps `fit_polyline`'s fillets honest about a short leg
-keeps a junction's corners honest about a narrow arm.
+closed-form arithmetic. The room each side can give is the kerb it still has
+*past* that crossing, bounded by the same max-trim budget, so the same clamp
+that keeps `fit_polyline`'s fillets honest about a short leg keeps a junction's
+corners honest about a stubby arm.
+
+**The trim is the kerb crossing plus the fillet's tangent length**, which is why
+`_solve_trims` solves the corner rather than leaving it to a second pass. An arc
+tangent to both kerbs touches them *beyond* the point where those kerbs cross:
+stop an end at the crossing itself and its mouth sits short of where the corner
+begins, so the junction surface bulges past the mouth and the pavement band
+floats off the kerb it is meant to continue - the two halves of the same off-by-
+a-tangent-length. Pull each end back by that tangent instead and the corner arc
+lands exactly on the mouth it was solved with, which is what lets both the
+surface outline and the footway be built by splicing arcs between mouth corners
+with no joining geometry at all.
 
 **A corner handle's pull is a tangent length, not a radius** (`RoadSegment.
 pull_a`/`pull_b`, `None` meaning derive it). `radius * tan(deflection / 2) ==
 tangent_length` is `corner_fillet`'s own formula, inverted so a pull sets the
 trim and the radius together: drag the handle out and the corner opens up to
 match, rather than the radius staying pinned to a default while a straight run
-opens up in between. Storing a tangent length instead of a radius is also what
-lets a pull override the trim on its own, independent of whether the corner
-it feeds ever gets rounded at all.
+opens up in between. A tangent length is also the thing the trim is written in,
+so a pull moves the mouth by exactly what it says.
 
-Pavement bands (`road/pavement.py`) follow the same fillet arc outward by one
-sidewalk width, concentric by construction - `ArcSegment.offset` guarantees
-that, the same guarantee every lane ribbon already relies on. A corner with no
+Pavement bands (`road/pavement.py`) follow the same fillet arc by one sidewalk
+width, concentric by construction - `ArcSegment.offset` guarantees that, the
+same guarantee every lane ribbon already relies on. *Which side* is not a
+choice: a junction corner curves around a centre out in the empty corner the
+roads leave, so the edge facing the carriageway is the larger radius. Offset it
+the other way and the footway swings out into the block. A corner with no
 sidewalk on either connecting arm gets no band, not an empty one.
 
 **Schema note:** `pull_a`/`pull_b` are written now, ahead of the `level` field
 the milestone plan bundled them with, because nothing about them needs a level
 to exist. They are additive and optional - omitted entirely when unset - so the
 save format did not need a version bump to gain them.
-
-

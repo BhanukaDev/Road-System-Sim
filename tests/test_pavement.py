@@ -2,7 +2,10 @@
 
 The one invariant that matters is concentricity: `curb` and `inner` share a
 centre and are exactly one sidewalk width apart at every sampled angle, not
-just at their tangent points.
+just at their tangent points. Which side `inner` sits on matters just as much -
+a corner arc curves around a centre out in the empty corner, so the edge facing
+the carriageway is the *larger* radius, and getting that backwards throws the
+footway off into the block.
 """
 
 from __future__ import annotations
@@ -45,7 +48,8 @@ def test_a_pavement_band_is_concentric_with_its_corner():
         assert band.curb is not None
         assert band.inner is not None
         assert_vec(band.curb.center, band.inner.center)
-        assert approx(band.curb.radius - band.inner.radius, width, 1e-6)
+        assert approx(band.inner.radius - band.curb.radius, width, 1e-6)
+        assert band.inner.center.distance_to(ORIGIN) > band.curb.radius
         next_corner = 2 * ((band.corner_index + 1) % len(junction.ends))
         assert_vec(band.outer_start, junction.polygon[2 * band.corner_index + 1])
         assert_vec(band.outer_end, junction.polygon[next_corner])
@@ -104,7 +108,7 @@ def test_profile_change_keeps_pavements_inside_their_kerbs():
     assert len(bands) == len(junction.ends)
     for band in bands:
         assert approx(
-            band.curb.radius - band.inner.radius,
+            band.inner.radius - band.curb.radius,
             RESIDENTIAL_TWO_WAY.lanes[0].width,
             1e-6,
         )
