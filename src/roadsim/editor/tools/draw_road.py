@@ -7,6 +7,13 @@ downstream can tell which one the user did.
 
 An end that lands on an existing road splits it first, in the same undo step, so
 a T-junction is one action and one undo.
+
+**An end that lands on a lane handle joins by that lane (D21).** Hovering a
+node here publishes its lane and edge handles, and clicking one ends the road
+at that node with its profile shifted so the chosen lane lines up
+(`editor/lane_draw.py`). The pairing is solved at commit, not at the click:
+until the stroke has a direction there is no frame to measure a lane offset
+in, and the same function then answers for both ends of the finished path.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import pygame
 from ... import config
 from ...geometry import Path, Vec2, fit_freehand, fit_polyline
 from ...road.network import RoadNetwork
+from ...road.profile import RoadProfile
 from ..commands import (
     AddSegment,
     Command,
@@ -28,6 +36,8 @@ from ..commands import (
 )
 from ..context import AngleReadout, EditorContext, ToolPreview
 from ..guides import find_guides
+from ..handle import PreviewHandle, node_preview_handles
+from ..lane_draw import profile_for_lane_ends
 from ..modifiers import Modifiers
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
@@ -36,8 +46,9 @@ from ..tool import Tool
 class DrawRoadTool(Tool):
     name = "draw"
     hint = (
-        "click corners, or drag to sketch   [Enter]/right-click commit   "
-        "[Backspace] undo point   [Shift] 15 deg   [Esc] cancel"
+        "click corners, or drag to sketch   click a lane to join by it   "
+        "[Enter]/right-click commit   [Backspace] undo point   "
+        "[Shift] 15 deg   [Esc] cancel"
     )
 
     def __init__(self) -> None:
@@ -47,6 +58,11 @@ class DrawRoadTool(Tool):
         self._pressed_at: tuple[int, int] | None = None
         self._dragging = False
         self._blocked = ""
+        self._hover: Snap | None = None
+        """What the cursor is over right now, kept because `ctx.cursor` is the
+        point a road would *end* at and a lane handle is not that point - the
+        preview needs both, and re-snapping from the landing point would ask a
+        different question to the one the user answered."""
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -63,6 +79,7 @@ class DrawRoadTool(Tool):
         self._pressed_at = None
         self._dragging = False
         self._blocked = ""
+        self._hover = None
 
     # -- input -------------------------------------------------------------
 
@@ -83,7 +100,8 @@ class DrawRoadTool(Tool):
         return False
 
     def _on_motion(self, event: pygame.event.Event, ctx: EditorContext) -> bool:
-        ctx.cursor = self._snap(ctx, event.pos).position
+        self._hover = self._snap(ctx, event.pos)
+        ctx.cursor = self._hover.attach_position
         if self._pressed_at is None:
             return False
         moved = _pixels_from(self._pressed_at, event.pos)
@@ -93,7 +111,7 @@ class DrawRoadTool(Tool):
             self.stroke = [ctx.world(*self._pressed_at)]
             if not self.points:
                 self.start_snap = self._snap(ctx, self._pressed_at)
-                self.stroke[0] = self.start_snap.position
+                self.stroke[0] = self.start_snap.attach_position
         if self._dragging and self.stroke is not None:
             self.stroke.append(ctx.world(*event.pos))
         return True
@@ -129,7 +147,9 @@ class DrawRoadTool(Tool):
         snap = self._snap(ctx, pos)
         if not self.points:
             self.start_snap = snap
-        self.points.append(snap.position)
+        # `attach_position`, not `position`: a lane handle is aimed at, but the
+        # road ends at its node - the lane is honoured by the datum (D21).
+        self.points.append(snap.attach_position)
 
     def _finish_stroke(self, ctx: EditorContext, pos: tuple[int, int]) -> None:
         """A freehand stroke is a whole road on its own - commit it at once."""
@@ -137,18 +157,18 @@ class DrawRoadTool(Tool):
             self.stroke = None
             return
         end_snap = self._snap(ctx, pos)
-        self.stroke[-1] = end_snap.position
+        self.stroke[-1] = end_snap.attach_position
         try:
             path = fit_freehand(self.stroke, config.DEFAULT_CORNER_RADIUS)
         except ValueError:
             self._reset()
             return
         self.stroke = None
-        self.points = _corner_points(path, self.stroke_start(), end_snap.position)
+        self.points = _corner_points(path, self.stroke_start(), end_snap.attach_position)
         self._commit(ctx, end_snap)
 
     def stroke_start(self) -> Vec2:
-        return self.start_snap.position if self.start_snap else Vec2(0.0, 0.0)
+        return self.start_snap.attach_position if self.start_snap else Vec2(0.0, 0.0)
 
     def _commit(self, ctx: EditorContext, end_snap: Snap | None = None) -> None:
         points = list(self.points)
@@ -157,7 +177,7 @@ class DrawRoadTool(Tool):
             return
         if end_snap is None:
             end_snap = ctx.snapper.snap(points[-1])
-            points[-1] = end_snap.position
+            points[-1] = end_snap.attach_position
 
         command = build_road_command(ctx, points, self.start_snap, end_snap)
         if isinstance(command, str):
@@ -175,11 +195,12 @@ class DrawRoadTool(Tool):
         preview = ToolPreview(
             points=list(self.points),
             profile=ctx.profile,
-            snap=ctx.snapper.snap(ctx.cursor),
+            snap=self._hover or _snap_at_cursor(ctx),
             invalid=bool(self._blocked),
             reason=self._blocked,
             guides=find_guides(ctx.network, ctx.camera, ctx.cursor),
         )
+        preview.handles = self._lane_handles(ctx, preview.snap)
         points = self.stroke if self._dragging else [*self.points, ctx.cursor]
         if points and len(points) >= 2:
             fit = fit_freehand if self._dragging else fit_polyline
@@ -204,12 +225,35 @@ class DrawRoadTool(Tool):
             lines.append(self._blocked)
         return lines
 
+    def _lane_handles(
+        self, ctx: EditorContext, snap: Snap | None
+    ) -> list[PreviewHandle]:
+        """Every lane handle of the node the cursor is near, with the one being
+        aimed at marked. Offered while drawing and not while moving (D21),
+        because here picking one is the whole point of the click."""
+        if snap is not None and snap.kind is SnapKind.LANE:
+            handle = snap.lane_handle
+            return node_preview_handles(ctx.network, handle.node_id, handle)
+        near = ctx.snapper.nearest_node(ctx.cursor)
+        if near is None:
+            return []
+        return node_preview_handles(ctx.network, near.node_id)
+
     # -- helpers -----------------------------------------------------------
 
     def _snap(self, ctx: EditorContext, pos: tuple[int, int]) -> Snap:
+        return self._snap_world(ctx, ctx.world(*pos))
+
+    def _snap_world(self, ctx: EditorContext, point: Vec2) -> Snap:
+        """A lane handle beats everything else, the way a node already beats a
+        segment: it is the most specific thing under the cursor, and it is the
+        only one of them that says *which part* of a road was meant."""
+        lane = ctx.snapper.nearest_lane_handle(point)
+        if lane is not None:
+            return lane
         mods = Modifiers.current()
         return ctx.snapper.snap(
-            ctx.world(*pos),
+            point,
             from_point=self.points[-1] if self.points else None,
             constrain_angle=mods.shift,
         )
@@ -229,7 +273,7 @@ def build_road_command(
     if _same_node(start, end):
         if _loop_too_short(points):
             return "road is too short"
-        return _loop_command(ctx, points, start.node_id)
+        return _loop_command(ctx, points, start.attach_node_id)
     if points[0].distance_to(points[-1]) < config.MIN_ROAD_LENGTH:
         return "road is too short"
 
@@ -242,16 +286,42 @@ def build_road_command(
     steps: list[Command] = []
     slot_a = _endpoint(steps, points[0], start)
     slot_b = _endpoint(steps, points[-1], end)
-    steps.append(AddSegment(slot_a, slot_b, points, ctx.profile))
+    steps.append(AddSegment(slot_a, slot_b, points, _profile_for(ctx, points, start, end)))
     if len(steps) == 1:
         return steps[0]
     return Composite(steps, label="draw road")
 
 
+def _profile_for(
+    ctx: EditorContext, points: list[Vec2], start: Snap | None, end: Snap | None
+) -> RoadProfile:
+    """The active profile, shifted if either end was drawn onto a lane (D21).
+
+    The shift needs the road's own end frame, so it is solved here - from the
+    same `fit_polyline` the segment itself will run - rather than at the click
+    that chose the lane, where the road had no direction yet. A stroke that
+    cannot be fitted is not this function's problem: `AddSegment` will raise on
+    it either way, and guessing a datum for a road that will not exist would
+    only make the failure harder to read.
+    """
+    start_handle = start.lane_handle if start is not None else None
+    end_handle = end.lane_handle if end is not None else None
+    if start_handle is None and end_handle is None:
+        return ctx.profile
+    try:
+        path = fit_polyline(list(points), config.DEFAULT_CORNER_RADIUS)
+    except ValueError:
+        return ctx.profile
+    return profile_for_lane_ends(ctx.profile, path, start_handle, end_handle)
+
+
 def _endpoint(steps: list[Command], point: Vec2, snap: Snap | None) -> NodeSlot:
-    """Turn one end of the stroke into a node id, adding commands as needed."""
-    if snap is not None and snap.kind is SnapKind.NODE:
-        return NodeSlot(snap.node_id)
+    """Turn one end of the stroke into a node id, adding commands as needed.
+
+    A `LANE` snap resolves to its own node: the lane it names is honoured by
+    the profile's datum (`_profile_for`), never by a second node."""
+    if snap is not None and snap.attach_node_id is not None:
+        return NodeSlot(snap.attach_node_id)
     if snap is not None and snap.kind is SnapKind.SEGMENT:
         segment_id, s = snap.segment_hit
         split = SplitSegment(segment_id, s)
@@ -285,12 +355,13 @@ def _loop_too_short(points: list[Vec2]) -> bool:
 
 
 def _same_node(a: Snap | None, b: Snap | None) -> bool:
+    """Both ends on the same node - a loop. A lane handle counts, because it
+    names a node too; two different lanes of one node are still one node."""
     return (
         a is not None
         and b is not None
-        and a.kind is SnapKind.NODE
-        and b.kind is SnapKind.NODE
-        and a.node_id == b.node_id
+        and a.attach_node_id is not None
+        and a.attach_node_id == b.attach_node_id
     )
 
 
@@ -314,6 +385,13 @@ def _corner_points(path: Path, start: Vec2, end: Vec2) -> list[Vec2]:
     return points
 
 
+def _snap_at_cursor(ctx: EditorContext) -> Snap:
+    """The preview's fallback when no motion has been seen yet - the same
+    priority as a real hover, minus the angle constraint, which belongs to a
+    live modifier key and not to a repaint."""
+    return ctx.snapper.nearest_lane_handle(ctx.cursor) or ctx.snapper.snap(ctx.cursor)
+
+
 def _pixels_from(a: tuple[int, int], b: tuple[int, int]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
@@ -333,8 +411,8 @@ def _arms_at_snap(network: RoadNetwork, snap: Snap) -> list[Vec2]:
     A node may carry several arms (an existing junction); a mid-segment snap
     has exactly two, one each way along that one road.
     """
-    if snap.kind is SnapKind.NODE:
-        node = network.nodes.get(snap.node_id)
+    if snap.attach_node_id is not None:
+        node = network.nodes.get(snap.attach_node_id)
         if node is None:
             return []
         arms = []

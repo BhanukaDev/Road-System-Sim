@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..geometry import Vec2
+from ..road.lane_handle import LaneHandle, LaneHandleKind, node_lane_handles
+from ..road.network import RoadNetwork
 
 
 class HandleKind(Enum):
@@ -42,3 +44,34 @@ class PreviewHandle:
     kind: HandleKind
     active: bool = False
     """The one being dragged, or the one the cursor is over."""
+
+
+_LANE_KIND = {
+    LaneHandleKind.LANE: HandleKind.LANE,
+    LaneHandleKind.EDGE: HandleKind.EDGE,
+}
+
+
+def node_preview_handles(
+    network: RoadNetwork, node_id: int, active: LaneHandle | None = None
+) -> list[PreviewHandle]:
+    """Every lane and edge handle at a node, as preview data.
+
+    One helper rather than one per tool: a lane handle looks the same whoever
+    is offering it, and the only thing a tool decides is *which* node to offer
+    and which handle is currently live. `active` is compared by position, not
+    identity, because the handle a tool is holding was read from an earlier
+    rebuild of the network and is a different object to the one this call
+    derives.
+    """
+    return [
+        PreviewHandle(
+            handle.position,
+            _LANE_KIND[handle.kind],
+            active is not None
+            and handle.kind is active.kind
+            and handle.index == active.index
+            and handle.segment_id == active.segment_id,
+        )
+        for handle in node_lane_handles(network, node_id)
+    ]

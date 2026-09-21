@@ -150,26 +150,19 @@ Landed so far:
   offset by a footway's width, so sidewalks now run *through* a bend instead of
   stopping either side of it. Two arms meeting is a joint in one road, not a
   crossing, and is filled as carriageway (D17).
-- **Nodes are grabbed by a lane, not only by their centre.** `road/lane_handle.py`
-  adds one handle per lane and per lane edge at each end of a node, sitting on
-  the *untrimmed* end so a live junction rebuild never moves it mid-drag.
-  `editor/node_grab.py` and `MoveNodeTool` compute every drag - lane handle or
-  the plain centre alike - as `node.position = drop.position - lever`, a lever
-  frozen at grab time; because both ends are resolved to absolute world
-  positions first, joining roads of different lane counts by a chosen lane or
-  kerb needs no flip term in either direction (D18). Dropped *on another
-  road's lane* rather than open space, the two roads actually connect:
-  `road/network.py:merge_nodes` - the first thing here that joins two
-  already-existing nodes - folds the dragged one into the target, and
-  `editor/lane_connect.py` sets the dragged segment's `RoadProfile.datum`
-  (`with_datum`, named apart from its source the way `mirrored()` is) so the
-  chosen lane lines up, computed from the geometry only the merge settles.
-  For two roads meeting collinearly - a road narrowing or widening as it
-  continues - that lines up the lane's exact world position and the existing
-  `road/transition.py` taper renders; at a real angle a single datum cannot
-  do that, and the honest guarantee narrows to the lane's own local offset
-  matching the target's, the same pairing every other junction already uses
-  (D20).
+- **Lane handles belong to drawing, not to moving (D21).** `road/lane_handle.py`
+  publishes one handle per lane and per lane edge at each end of a node, sitting
+  on the *untrimmed* end so a live junction rebuild never moves it. Those
+  handles appear while the **draw** tool is active: hovering a node shows its
+  lanes, and starting or finishing a stroke on one builds the new road onto that
+  node with its `RoadProfile.datum` shifted so the chosen lane lines up
+  (`editor/lane_draw.py`). The pairing is solved at commit, from the fitted
+  path, because until the stroke has a direction there is no frame to measure a
+  lateral offset in; it matches the *nearest* candidate rather than the same
+  index, since the two roads rarely have the same lane count. One `AddSegment`,
+  one undo step, no merge. The **move** tool went back to one node, one centre
+  handle: it changes a position and never a topology, and dropping it on another
+  road's lane connects nothing (D18, D21).
 - **A selected road's own shape is a set of real handles.** `road/shape_handle.py`
   derives one at every fillet's belly and both its tangent points, and at each
   straight's midpoint, from `segment.path.pieces` alone - looking changes
@@ -189,5 +182,5 @@ rounded corners, the corner handle and pavements.
 showcase - which now includes a shallow gore and a lane taper - and
 `--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D20 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D21 are this
 milestone's.

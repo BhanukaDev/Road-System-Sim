@@ -30,6 +30,12 @@ class Modifiers:
 
     @staticmethod
     def current() -> "Modifiers":
+        """With no window open - a test driving a tool directly - nothing is
+        held. That is the truth, not a fallback: a modifier is a live keyboard
+        state, and there is no keyboard. Returning it rather than raising is
+        what lets a tool ask unconditionally instead of guarding the call."""
+        if not pygame.get_init() or not pygame.display.get_init():
+            return Modifiers()
         mods = pygame.key.get_mods()
         return Modifiers(
             shift=bool(mods & pygame.KMOD_SHIFT),

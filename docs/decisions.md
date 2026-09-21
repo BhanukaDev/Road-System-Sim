@@ -671,3 +671,60 @@ handle still just moves the node to that handle's position, exactly as
 before D18. A centre-handle drag has no lane to align by, and D18's own
 alignment claim - "profile unchanged, lanes still parallel" - is what that
 handle was asked to keep meaning.
+
+## D21. Lanes are picked while a road is drawn, not while a node is moved
+
+**The symptom.** D20 put lane connection on the move tool: grab a node by one
+of its lanes, drop it on another road's lane, and the two join. In use, that
+is the wrong tool for it, for two reasons that pull in opposite directions.
+Moving a node is a position question - "put it there" - and a node sprouting
+eight or ten rings the moment the cursor nears it answers a question nobody
+asked, obscuring the one handle the user actually wanted. Meanwhile the roads
+being joined are usually not both there yet: the real gesture is *draw a
+two-lane residential onto lane 2 of that four-lane*, a single stroke, and
+splitting it into "draw, then move onto" is two undo steps for one intention.
+
+So the lane handles moved to `tools/draw_road.py`, where picking one is the
+point of the click, and `tools/move_node.py` went back to one node, one
+handle, one question. D20's machinery is not repudiated - `road/lane_handle.py`
+and `RoadProfile.with_datum` are exactly as D18 and D20 left them - only its
+caller changed. `editor/lane_connect.py` went with the caller: joining two
+*already-drawn* nodes has no gesture left that reaches it, and a module kept
+alive by its tests alone is a second answer waiting to disagree with the first.
+`RoadNetwork.merge_nodes` stays, tested in its own right, for the bulldoze and
+replace work M3 still owes.
+
+**Nothing is merged, so nothing has to be un-merged.** Drawing onto a lane
+handle ends the road at that handle's *node* - `Snap.attach_node_id` and
+`attach_position` say so for every snap kind at once, and `_endpoint` treats a
+lane snap as the node snap it is. That is `AddSegment` attaching to an existing
+node, which this editor has done since M2; the whole merge-then-rewind dance
+D20 needed exists only because both nodes were already real. One `AddSegment`,
+one undo step, and the alignment rides along in the profile the segment is
+built with.
+
+**The pairing is solved at commit, because that is when the road has a
+direction.** A datum is a lateral offset, and lateral is only meaningful
+relative to a frame; at the click that chooses the lane, the stroke may be a
+single point with no heading at all. So `editor/lane_draw.py` is handed the
+*fitted path* and answers both ends from it with one function, after the fact -
+the same "solve it once the geometry is settled" shape D20 reached for with
+its unrecorded merge, minus the merge.
+
+**Nearest lane, not matching index.** The new road and the target generally
+have different lane counts - a 2-lane joining a 4-lane is the case the feature
+exists for - so index `k` names nothing shared. The picked handle is projected
+into the new road's own end frame to a single lateral `t`, and the new
+profile's own candidate offsets (lane centres and edges, the identical list
+`road/lane_handle.py` publishes) are searched for the nearest. Because both
+sides are resolved to world positions before anything is compared, no flip term
+appears for any of the four end-to-end orientations - the same reason D18's
+lever needs none.
+
+**One datum, two ends, and the start wins.** A profile carries one datum and a
+road has two ends, so a stroke that begins on one road's lane and finishes on
+another's cannot honour both: lanes converging along a road is a taper, which
+is `road/transition.py`'s and needs two segments. Rather than silently
+averaging or quietly dropping one, `profile_for_lane_ends` states the rule -
+the start, the end the user deliberately began from - and
+`tests/test_lane_draw.py` pins it.

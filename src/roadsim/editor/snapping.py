@@ -36,9 +36,11 @@ class SnapKind(Enum):
     LANE = "lane"
     """A lane or lane-edge handle at a node. Payload: the `LaneHandle`.
 
-    Asked for explicitly by a node drag (`editor/node_grab.py`), never through
-    `snap()` - a lane drop is a targeted question about what a specific drag is
-    holding, not the generic "what is under the cursor" every tool shares."""
+    A real connection, not an aid: a road drawn onto one ends at that handle's
+    node and is shifted so the chosen lane lines up (`editor/lane_draw.py`,
+    D21). Asked for explicitly by the tools that can act on one, never through
+    `snap()` - offering it to every tool would mean each of them deciding what
+    a lane means to it, which is the branch a registry exists to avoid."""
     SEGMENT = "segment"
     """Split there and connect. Payload: (segment id, arc length)."""
     ANGLE = "angle"
@@ -70,9 +72,29 @@ class Snap:
         return self.payload if self.kind is SnapKind.LANE else None
 
     @property
+    def attach_node_id(self) -> int | None:
+        """The node a road drawn to this snap should end at, if any. A `LANE`
+        snap names one as surely as a `NODE` snap does - it is a node plus the
+        lane that was pointed at."""
+        if self.kind is SnapKind.NODE:
+            return self.payload
+        if self.kind is SnapKind.LANE:
+            return self.payload.node_id
+        return None
+
+    @property
+    def attach_position(self) -> Vec2:
+        """Where a road drawn to this snap actually ends. Everything but a
+        `LANE` snap ends where it points; a lane handle ends at its *node*,
+        with the lane honoured by the profile's datum instead (D21)."""
+        if self.kind is SnapKind.LANE:
+            return self.payload.node_position
+        return self.position
+
+    @property
     def is_free(self) -> bool:
         """True when nothing in the network claimed this point."""
-        return self.kind in (SnapKind.ANCHOR, SnapKind.LANE, SnapKind.GRID, SnapKind.ANGLE)
+        return self.kind in (SnapKind.ANCHOR, SnapKind.GRID, SnapKind.ANGLE)
 
 
 class Snapper:

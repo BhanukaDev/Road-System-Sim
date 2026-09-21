@@ -1,10 +1,18 @@
-"""Taking hold of a node - by its centre, or by one of its lane handles.
+"""Taking hold of a node.
 
 A grab is a property of the drag in progress, not of the network: it lives on
 the tool that started it, never on `RoadNode`, `Selection` or a `Command`. The
-command a drag eventually produces is a plain `MoveNode(node_id, position)` -
-the lever has already been resolved into that position by the time anything is
-recorded, so a lane grab touches undo, redo and serialization not at all.
+command a drag eventually produces is a plain `MoveNode(node_id, position)`,
+so a grab touches undo, redo and serialization not at all.
+
+**A node is grabbed by its centre and nothing else (D21).** Lane handles were
+briefly offered here too, so that dropping one lane on another connected two
+roads; they now belong to `tools/draw_road.py`, where a road is *built* onto a
+chosen lane in the same stroke that draws it. Moving a node is about where it
+sits, so the move tool asks one question and gets one answer - and a node
+carrying six or eight rings while you only wanted to nudge it said otherwise.
+`road/lane_handle.py` and `editor/lane_connect.py` are unchanged; only who
+calls them moved.
 """
 
 from __future__ import annotations
@@ -12,7 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..geometry import Vec2
-from ..road.lane_handle import LaneHandle
 from .context import EditorContext
 
 
@@ -21,29 +28,11 @@ class NodeGrab:
     node_id: int
     origin: Vec2
     """The node's position at grab time - for rewind and cancel."""
-    lever: Vec2
-    """Where the grabbed point sits relative to the node. `Vec2(0, 0)` for the
-    plain centre handle - today's whole behaviour is this case."""
-    handle: LaneHandle | None = None
-    """`None` for the centre handle; set for a lane or edge handle, for the
-    HUD and the preview - never read to compute the move itself."""
 
 
 def grab_at(ctx: EditorContext, point: Vec2) -> NodeGrab | None:
-    """What a click at `point` takes hold of. A lane handle beats the node
-    centre, the way a node already beats a segment in `tools/select.py:pick`."""
-    lane = ctx.snapper.nearest_lane_handle(point)
-    if lane is not None:
-        handle = lane.lane_handle
-        return NodeGrab(
-            handle.node_id,
-            ctx.network.nodes[handle.node_id].position,
-            handle.lever,
-            handle,
-        )
+    """What a click at `point` takes hold of."""
     node = ctx.snapper.nearest_node(point)
-    if node is not None:
-        return NodeGrab(
-            node.node_id, ctx.network.nodes[node.node_id].position, Vec2(0.0, 0.0)
-        )
-    return None
+    if node is None:
+        return None
+    return NodeGrab(node.node_id, ctx.network.nodes[node.node_id].position)

@@ -52,6 +52,13 @@ class LaneHandle:
     """`node.position + normal * offset`."""
 
     @property
+    def node_position(self) -> Vec2:
+        """The node this handle belongs to - the handle less its own offset.
+        A road drawn onto this handle ends *here*, not on the handle itself
+        (`editor/lane_draw.py`, D21)."""
+        return self.position - self.lever
+
+    @property
     def lever(self) -> Vec2:
         """Where this handle sits relative to the node - what a drag preserves."""
         return self.normal * self.offset
