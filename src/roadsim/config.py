@@ -41,6 +41,10 @@ SNAP_SEGMENT_PX = 12.0
 SNAP_GRID_PX = 9.0
 ANGLE_SNAP_DEG = 15.0
 """Held-Shift direction constraint while drawing."""
+ALIGNMENT_GUIDE_PX = 6.0
+"""How close, on screen, a point must sit to a node's x or y, or to an existing
+straight arm's own line, before a guide is drawn for it. Tight on purpose - a
+guide is a hint the point already lines up, not an invitation to snap."""
 
 DIRECTION_ARROW_SPACING = 18.0
 """Metres between the travel-direction arrows drawn along each traffic lane."""
@@ -132,6 +136,7 @@ class Color:
     SNAP_SEGMENT = (120, 190, 226)
     SNAP_GRID = (140, 146, 158)
     SNAP_ANGLE = (226, 150, 220)
+    GUIDE = (168, 120, 226)
 
     HUD_TEXT = (214, 218, 226)
     HUD_DIM = (128, 134, 144)

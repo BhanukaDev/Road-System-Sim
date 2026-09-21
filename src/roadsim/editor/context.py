@@ -20,6 +20,7 @@ from ..road.network import RoadNetwork
 from ..road.presets import DEFAULT_PROFILE, PROFILES
 from ..road.profile import RoadProfile
 from .commands import Command, History
+from .guides import Guide
 from .snapping import Snap, Snapper
 
 
@@ -72,8 +73,12 @@ class ToolPreview:
     snap: Snap | None = None
     invalid: bool = False
     """The preview cannot be committed as it stands - drawn as a warning."""
+    reason: str = ""
+    """Why, when `invalid` - carried as data so the overlay can show it, rather
+    than a tool reaching past its preview to draw text of its own."""
     measurement: float | None = None
     angles: list[AngleReadout] = field(default_factory=list)
+    guides: list[Guide] = field(default_factory=list)
     profile: RoadProfile | None = None
     """Cross-section to use when drawing the preview roads."""
 
@@ -86,6 +91,7 @@ class ToolPreview:
             or self.snap
             or self.measurement is not None
             or self.angles
+            or self.guides
         )
 
 

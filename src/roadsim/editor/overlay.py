@@ -104,6 +104,14 @@ class EditorOverlay:
     ) -> None:
         color = config.Color.SEGMENT_ERROR if preview.invalid else config.Color.PREVIEW
 
+        for guide in preview.guides:
+            _dashed_line(
+                surface,
+                config.Color.GUIDE,
+                camera.to_screen(guide.anchor),
+                camera.to_screen(guide.point),
+            )
+
         if preview.profile is not None:
             for layer in LAYERS:
                 for path in preview.paths:
@@ -148,6 +156,13 @@ class EditorOverlay:
                 config.Color.HUD_TEXT,
             )
             surface.blit(label, (x + 8, y + 8))
+
+        if preview.invalid and preview.reason and preview.points:
+            x, y = camera.to_screen(preview.points[-1])
+            label = pygame.font.SysFont("consolas,menlo,monospace", 12).render(
+                preview.reason, True, config.Color.SEGMENT_ERROR
+            )
+            surface.blit(label, (x + 8, y - 20))
 
         if preview.snap is not None:
             self._draw_snap(surface, camera, preview.snap)
@@ -203,3 +218,34 @@ def _plus(
     x, y = center
     pygame.draw.line(surface, color, (x - r, y), (x + r, y), 1)
     pygame.draw.line(surface, color, (x, y - r), (x, y + r), 1)
+
+
+def _dashed_line(
+    surface: pygame.Surface,
+    color,
+    a: tuple[float, float],
+    b: tuple[float, float],
+    dash: float = 6.0,
+) -> None:
+    """An alignment guide reads as a hint, not as committed geometry - a solid
+    line would look like a road already there."""
+    ax, ay = a
+    bx, by = b
+    length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+    if length < 1e-6:
+        return
+    step = dash / length
+    t = 0.0
+    on = True
+    while t < 1.0:
+        t_next = min(t + step, 1.0)
+        if on:
+            pygame.draw.line(
+                surface,
+                color,
+                (ax + (bx - ax) * t, ay + (by - ay) * t),
+                (ax + (bx - ax) * t_next, ay + (by - ay) * t_next),
+                1,
+            )
+        on = not on
+        t = t_next

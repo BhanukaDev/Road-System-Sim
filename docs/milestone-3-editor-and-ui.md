@@ -92,9 +92,10 @@ Each step leaves the app runnable and the suite green.
 4. **Previews that show the real road.** `ToolPreview` grows ghosts, guides,
    measurements, highlights, anchors and a rejection reason; `road/cap.py`;
    `road/anchor.py`; `editor/guides/`; the overlay and snapper `if`-chains become
-   registries. The current slice adds the real road length into the preview data
-   model and draws it in the editor overlay, so the preview now reflects the
-   fitted centreline rather than a raw point list.
+   registries. The current slice adds `editor/guides.py`: horizontal, vertical
+   and road-extension alignment guides drawn dashed in the overlay while
+   drawing, plus a rejection reason carried on `ToolPreview` itself (not just
+   `ctx.status`) so a blocked road shows why, next to where it was refused.
 5. **Tool modes, loops, bulldoze, replace.** `editor/shapers/`;
    `editor/road_build.py`; `editor/impact.py`; the bulldoze and replace tools.
 6. **Levels, colliders, crossings.** `level` and the corner pulls stored together

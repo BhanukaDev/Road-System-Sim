@@ -180,6 +180,26 @@ def test_preview_shows_the_turn_angle_at_each_interior_corner(ctx):
     assert approx(corner.degrees, 90.0)
 
 
+def test_preview_carries_a_guide_extending_an_existing_road(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(80.0, 0.0)]
+    ctx.cursor = Vec2(120.0, 0.001)  # past the east end, dead in line with it
+
+    preview = tool.preview(ctx)
+
+    assert any(g.anchor == Vec2(60.0, 0.0) for g in preview.guides)
+
+
+def test_a_blocked_preview_carries_its_reason(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 50.0), Vec2(0.0, 50.2)]  # too short to commit
+    tool._commit(ctx)
+
+    preview = tool.preview(ctx)
+    assert preview.invalid
+    assert preview.reason == "road is too short"
+
+
 # -- moving ---------------------------------------------------------------
 
 

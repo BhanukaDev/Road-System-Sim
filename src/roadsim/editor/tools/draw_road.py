@@ -27,6 +27,7 @@ from ..commands import (
     SplitSegment,
 )
 from ..context import AngleReadout, EditorContext, ToolPreview
+from ..guides import find_guides
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
 
@@ -175,6 +176,8 @@ class DrawRoadTool(Tool):
             profile=ctx.profile,
             snap=ctx.snapper.snap(ctx.cursor),
             invalid=bool(self._blocked),
+            reason=self._blocked,
+            guides=find_guides(ctx.network, ctx.camera, ctx.cursor),
         )
         points = self.stroke if self._dragging else [*self.points, ctx.cursor]
         if points and len(points) >= 2:
