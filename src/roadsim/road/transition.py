@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .. import config
-from ..geometry import Vec2
+from ..geometry import LineSegment, Path, Vec2, biarc
 from .junction import Junction, SegmentEnd
 from .markings import LaneMarking, MarkingKind, lane_markings
 from .profile import RoadProfile
@@ -35,12 +35,19 @@ class TransitionMarking:
     kind: MarkingKind
     start: Vec2
     end: Vec2
-    """A straight run across the patch, from one mouth to the other.
+    """The patch's two ends, for anything that only needs endpoints - dedup,
+    span-length culling. `curve` is what actually gets drawn."""
+    curve: Path
+    """`start` to `end`, leaving and arriving along each mouth's own heading.
 
-    Straight because the patch is the gap between two mouths that a junction
-    has already trimmed square to their own roads: there is no curve left to
-    follow between them, and inventing one would be a line that agrees with
-    neither kerb.
+    A straight chord is only right when both mouths point the same way - two
+    arms of a dead-straight width change. Off a bend, the two mouths' frames
+    disagree about which way is forward, and a chord between them cuts across
+    whatever the road is doing in between, straight through the verge on the
+    outside of the curve. A biarc leaves each mouth tangent to its own road, the
+    same construction the kerb blend next to it already uses (D17), so a lane
+    line bends the way the kerb bends instead of arguing with it. Where the
+    mouths really are dead straight, the biarc degenerates to that same chord.
     """
     is_taper: bool = False
     """This line has no partner on the narrow side - it is the edge of a lane
@@ -90,8 +97,15 @@ def build_transition(
     # offsets mean opposite sides of the same tarmac. One flip here is the
     # whole of it - the alternative is every comparison below carrying a sign.
     flip = -1.0 if frame_a.normal.dot(frame_b.normal) < 0.0 else 1.0
+    # Both point the way traffic runs *across the patch* - into the node from
+    # `a`'s own road, then straight on out of it along `b`'s (the same pairing
+    # `_blends` leaves each junction corner with).
+    tangent_a = -frame_a.tangent if end_a.at_a else frame_a.tangent
+    tangent_b = frame_b.tangent if end_b.at_a else -frame_b.tangent
 
-    markings = _paired_markings(seg_a.profile, seg_b.profile, frame_a, frame_b, flip)
+    markings = _paired_markings(
+        seg_a.profile, seg_b.profile, frame_a, frame_b, flip, tangent_a, tangent_b
+    )
     arrows = _arrows(seg_a, end_a, seg_b, end_b)
     if not markings and not arrows:
         return None
@@ -112,7 +126,9 @@ def _anchor(profile: RoadProfile) -> float:
     return profile.datum
 
 
-def _entries(profile: RoadProfile, flip: float) -> tuple[list[LaneMarking], list[LaneMarking]]:
+def _entries(
+    profile: RoadProfile, flip: float
+) -> tuple[list[LaneMarking], list[LaneMarking]]:
     """This profile's markings either side of its anchor, ordered outward.
 
     A centre line sits *on* the anchor, so it goes into both lists rather than
@@ -152,6 +168,8 @@ def _paired_markings(
     frame_a,
     frame_b,
     flip: float,
+    tangent_a: Vec2,
+    tangent_b: Vec2,
 ) -> list[TransitionMarking]:
     anchor_a, anchor_b = _anchor(profile_a), _anchor(profile_b)
 
@@ -171,11 +189,21 @@ def _paired_markings(
         (left_a, left_b, kerb_left_a, kerb_left_b),
         (right_a, right_b, kerb_right_a, kerb_right_b),
     ):
-        out.extend(_pair_side(side_a, side_b, kerb_a, kerb_b, at_a, at_b))
+        out.extend(
+            _pair_side(side_a, side_b, kerb_a, kerb_b, at_a, at_b, tangent_a, tangent_b)
+        )
     return _deduped(out)
 
 
-def _pair_side(side_a, side_b, kerb_a, kerb_b, at_a, at_b) -> list[TransitionMarking]:
+def _marking_curve(start: Vec2, tangent_a: Vec2, end: Vec2, tangent_b: Vec2) -> Path:
+    """`start` to `end`, tangent to each mouth's own heading - a chord when
+    that heading agrees, a bend when it does not."""
+    return biarc(start, tangent_a, end, tangent_b) or Path.of(LineSegment(start, end))
+
+
+def _pair_side(
+    side_a, side_b, kerb_a, kerb_b, at_a, at_b, tangent_a: Vec2, tangent_b: Vec2
+) -> list[TransitionMarking]:
     """Match line for line outward from the anchor; run the rest out to the kerb.
 
     Counting outward from the middle is what makes a widening road read
@@ -189,16 +217,33 @@ def _pair_side(side_a, side_b, kerb_a, kerb_b, at_a, at_b) -> list[TransitionMar
     shared = min(len(side_a), len(side_b))
     for k in range(shared):
         kind = side_b[k].kind if len(side_b) >= len(side_a) else side_a[k].kind
+        start, end = at_a(side_a[k].offset), at_b(side_b[k].offset)
         out.append(
-            TransitionMarking(kind, at_a(side_a[k].offset), at_b(side_b[k].offset))
+            TransitionMarking(
+                kind, start, end, _marking_curve(start, tangent_a, end, tangent_b)
+            )
         )
     for extra in side_a[shared:]:
+        start, end = at_a(extra.offset), at_b(kerb_b)
         out.append(
-            TransitionMarking(extra.kind, at_a(extra.offset), at_b(kerb_b), True)
+            TransitionMarking(
+                extra.kind,
+                start,
+                end,
+                _marking_curve(start, tangent_a, end, tangent_b),
+                True,
+            )
         )
     for extra in side_b[shared:]:
+        start, end = at_a(kerb_a), at_b(extra.offset)
         out.append(
-            TransitionMarking(extra.kind, at_a(kerb_a), at_b(extra.offset), True)
+            TransitionMarking(
+                extra.kind,
+                start,
+                end,
+                _marking_curve(start, tangent_a, end, tangent_b),
+                True,
+            )
         )
     return out
 
@@ -262,7 +307,7 @@ def _arrows(
         frame = source.path.sample(s_at)
         # `+left` offsets against a normal that points left (D3): a lane left
         # of centre merges right, and the other way round.
-        decal = "arrow_merge_right" if centre > 0.0 else "arrow_merge_left"
+        decal = "arrow_merge_left" if centre > 0.0 else "arrow_merge_right"
         out.append(
             TransitionArrow(
                 frame.position + frame.normal * centre,

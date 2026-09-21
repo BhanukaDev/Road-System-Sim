@@ -11,8 +11,9 @@ from __future__ import annotations
 import pygame
 
 from .. import config
+from ..geometry import build_ribbon
 from ..road.decal import get as decal_for
-from ..road.transition import LaneTransition
+from ..road.transition import LaneTransition, TransitionMarking
 from .camera import Camera
 from .curves import to_screen_points
 from .decal_renderer import draw_decal
@@ -22,16 +23,25 @@ from .lane_markings import MARKING_COLOR, dash_intervals
 def draw_transition(
     surface: pygame.Surface, camera: Camera, transition: LaneTransition
 ) -> None:
-    width = max(1, round(config.MARKING_WIDTH_PX))
+    tolerance = camera.world_tolerance
+    half_width = config.MARKING_WIDTH / 2.0
     for marking in transition.markings:
-        span = marking.start.distance_to(marking.end)
-        if span * camera.zoom < config.MARKING_MIN_PX:
+        if marking.curve.length * camera.zoom < config.MARKING_MIN_PX:
             continue
         color = MARKING_COLOR[marking.kind]
         if marking.kind.is_dashed:
-            _dashed(surface, camera, marking, span, color, width)
+            _dashed(surface, camera, marking, tolerance, half_width, color)
         else:
-            _solid(surface, camera, marking, color, width)
+            _band(
+                surface,
+                camera,
+                marking.curve,
+                tolerance,
+                half_width,
+                color,
+                0.0,
+                marking.curve.length,
+            )
 
     for arrow in transition.arrows:
         decal = decal_for(arrow.decal)
@@ -48,20 +58,19 @@ def draw_transition(
         )
 
 
-def _solid(surface, camera, marking, color, width) -> None:
-    points = to_screen_points(camera, [marking.start, marking.end])
-    if len(points) >= 2:
-        pygame.draw.lines(surface, color, False, points, width)
+def _band(surface, camera, curve, tolerance, half_width, color, s0, s1) -> None:
+    ribbon = build_ribbon(curve, half_width, -half_width, tolerance, s0, s1)
+    points = to_screen_points(camera, ribbon.outline)
+    if len(points) >= 3:
+        pygame.draw.polygon(surface, color, points)
 
 
-def _dashed(surface, camera, marking, span, color, width) -> None:
+def _dashed(
+    surface, camera, marking: TransitionMarking, tolerance, half_width, color
+) -> None:
     """Dashes run from the patch's own start rather than from the road's arc
     length, because a transition is not on any one segment's parameterisation -
     there is no shared `s` across the gap to phase-lock to."""
-    direction = (marking.end - marking.start) / span
-    for d0, d1 in dash_intervals(0.0, span):
-        points = to_screen_points(
-            camera, [marking.start + direction * d0, marking.start + direction * d1]
-        )
-        if len(points) >= 2:
-            pygame.draw.lines(surface, color, False, points, width)
+    curve = marking.curve
+    for d0, d1 in dash_intervals(0.0, curve.length):
+        _band(surface, camera, curve, tolerance, half_width, color, d0, d1)

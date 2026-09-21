@@ -32,11 +32,16 @@ CURATED: dict[str, str] = {
     "RM_1169": "arrow_left",
     "RM_1125": "arrow_straight_left",
     "RM_1148": "arrow_straight_right",
-    "RM_1122": "arrow_merge_left",
-    "RM_1123": "arrow_merge_right",
+    "RM_1021": "arrow_merge_right",
     "RM_1178": "gore_hatch",
 }
-"""Source code -> the name the game knows it by."""
+"""Source code -> the name the game knows it by.
+
+`arrow_merge_left` is not in here: it is `RM_1019`, a left-right mirror of
+`RM_1021` with nothing else different, so `road/decal.py` derives it from
+`arrow_merge_right` by negating x rather than carrying two near-duplicate
+polygons - the same "use one and flip" call this file makes for handedness
+everywhere else."""
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
@@ -251,6 +256,8 @@ def read_rings(path: Path) -> list[list[tuple[float, float]]]:
     rings: list[list[tuple[float, float]]] = []
 
     def walk(node: ET.Element, parent: Matrix) -> None:
+        if node.tag == f"{SVG_NS}defs":
+            return  # a clip path's own geometry is never painted
         here = compose(parent, parse_transform(node.get("transform")))
         if node.tag == f"{SVG_NS}path":
             d = node.get("d")

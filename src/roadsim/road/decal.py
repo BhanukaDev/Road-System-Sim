@@ -60,7 +60,7 @@ class Decal:
 
 
 def _build() -> dict[str, Decal]:
-    return {
+    decals = {
         name: Decal(
             name,
             tuple(tuple(Vec2(x, y) for x, y in ring) for ring in rings),
@@ -68,6 +68,25 @@ def _build() -> dict[str, Decal]:
         )
         for name, rings in RINGS.items()
     }
+    for mirrored_name, source_name in MIRRORED.items():
+        source = decals[source_name]
+        decals[mirrored_name] = Decal(
+            mirrored_name,
+            tuple(tuple(Vec2(-p.x, p.y) for p in ring) for ring in source.rings),
+            source.aspect,
+        )
+    return decals
+
+
+MIRRORED: dict[str, str] = {
+    "arrow_merge_left": "arrow_merge_right",
+}
+"""Decal -> its source, built by negating `x` (the driver's right/left axis).
+
+`arrow_merge_left` (RM_1019) is a plain left-right mirror of `arrow_merge_right`
+(RM_1021) - the source library carries no name, but rendering both side by side
+confirms it - so only the source's rings are curated and this one is derived,
+rather than shipping a second near-duplicate polygon to maintain."""
 
 
 DECALS: dict[str, Decal] = _build()

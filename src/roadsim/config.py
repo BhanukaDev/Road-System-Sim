@@ -105,8 +105,10 @@ DIRECTION_ARROW_MIN_PX = 26.0
 STOP_LINE_WIDTH_PX = 3.0
 """Thickness of a terminal cap's stop line, in screen pixels."""
 
-MARKING_WIDTH_PX = 2.0
-"""Thickness of a lane marking line, in screen pixels."""
+MARKING_WIDTH = 0.15
+"""Metres of paint a lane marking is wide - world space, not screen pixels, so
+it stays the same size relative to the road at any zoom instead of the fixed
+stroke a screen-pixel width would draw."""
 MARKING_DASH_LENGTH = 3.0
 """Metres of paint in one dash of a lane divider."""
 MARKING_GAP_LENGTH = 5.0
@@ -132,27 +134,25 @@ TURN_ARROW_LENGTH = 4.0
 since there is only one per lane rather than one every `DIRECTION_ARROW_SPACING`."""
 TURN_ARROW_SETBACK = 6.0
 """Metres upstream of the stop line a turn decal sits."""
-TRANSITION_ARROW_LENGTH = 9.0
-"""Metres, the merge arrow painted where a lane is about to run out. Longer
-than a turn decal because it is read further ahead - a driver acts on it before
-reaching the taper, not at a stop line."""
-
-TRANSITION_ARROW_LANE_FRACTION = 0.85
-"""A merge arrow is a wide shape and it spans most of its lane on a real road,
-so it gets more room than `TURN_ARROW_LANE_FRACTION` allows a turn decal.
-Held below 1.0 all the same: a marking that touches the lane line it is telling
-you to cross reads as the line being broken."""
-
-TRANSITION_ARROW_SETBACK = 12.0
-"""Metres back up its own road from the transition mouth. A merge arrow is an
-instruction to change lane, so it has to arrive with room to act on it."""
-
 TURN_ARROW_LANE_FRACTION = 0.6
 """How much of a lane's width a turn decal may take up.
 
 Decals are scaled uniformly - squashing an arrow sideways would make it a
 different marking - so a lane too narrow for the arrow at
 `TURN_ARROW_LENGTH` gets a shorter one, not a thinner one."""
+
+TRANSITION_ARROW_LENGTH = TURN_ARROW_LENGTH
+"""Metres, the merge arrow painted where a lane is about to run out - the same
+scale as a turn decal, so one does not read as a different kind of marking."""
+
+TRANSITION_ARROW_LANE_FRACTION = TURN_ARROW_LANE_FRACTION
+"""Held to the same fraction of a lane's width as a turn decal, for the same
+reason: a marking that touches the lane line it is telling you to cross reads
+as the line being broken."""
+
+TRANSITION_ARROW_SETBACK = 12.0
+"""Metres back up its own road from the transition mouth. A merge arrow is an
+instruction to change lane, so it has to arrive with room to act on it."""
 
 PAN_KEY_SPEED_PX = 900.0
 """Keyboard and screen-edge pan speed, in *pixels* per second, converted to
