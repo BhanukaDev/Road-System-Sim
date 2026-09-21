@@ -36,15 +36,16 @@ The catalogue lists codes only, with **no names**, so the mapping was made by
 rendering every `RM_*.svg` to a contact sheet and reading it. That is a manual
 judgement, recorded here so it can be checked rather than trusted:
 
-| Code      | Name in game           | Read as                                      |
-| --------- | ---------------------- | -------------------------------------------- |
-| `RM_1167` | `arrow_straight`       | straight-ahead lane arrow                    |
-| `RM_1168` | `arrow_right`          | right-turn-only lane arrow                   |
-| `RM_1169` | `arrow_left`           | left-turn-only lane arrow                    |
-| `RM_1125` | `arrow_straight_left`  | straight-ahead with a left-turn branch       |
-| `RM_1148` | `arrow_straight_right` | straight-ahead with a right-turn branch      |
-| `RM_1021` | `arrow_merge_right`    | lane-change arrow, path joining to the right |
-| `RM_1178` | `gore_hatch`           | hatched taper for a gore / lane transition   |
+| Code      | Name in game                | Read as                                            |
+| --------- | --------------------------- | -------------------------------------------------- |
+| `RM_1167` | `arrow_straight`            | straight-ahead lane arrow                          |
+| `RM_1168` | `arrow_right`               | right-turn-only lane arrow                         |
+| `RM_1169` | `arrow_left`                | left-turn-only lane arrow                          |
+| `RM_1125` | `arrow_straight_left`       | straight-ahead with a left-turn branch             |
+| `RM_1148` | `arrow_straight_right`      | straight-ahead with a right-turn branch            |
+| `RM_1021` | `arrow_merge_right`         | lane-change arrow, path joining to the right       |
+| `RM_1178` | `gore_hatch`                | hatched taper for a gore / lane transition         |
+| `RM_1029` | `arrow_straight_left_right` | straight-ahead with both a left and a right branch |
 
 `arrow_merge_left` is not a ninth curated file: `RM_1019` is a plain left-right
 mirror of `RM_1021` with nothing else different, so `road/decal.py` derives it

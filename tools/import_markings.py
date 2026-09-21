@@ -34,6 +34,7 @@ CURATED: dict[str, str] = {
     "RM_1148": "arrow_straight_right",
     "RM_1021": "arrow_merge_right",
     "RM_1178": "gore_hatch",
+    "RM_1029": "arrow_straight_left_right",
 }
 """Source code -> the name the game knows it by.
 

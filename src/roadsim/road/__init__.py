@@ -17,7 +17,14 @@ from .pavement import PavementBand, build_pavement_bands
 from .presets import DEFAULT_PROFILE, PROFILES
 from .profile import RoadProfile
 from .segment import RoadSegment
-from .turn_arrows import TurnArrow, TurnKind, arrows_for_mouth, turn_arrows
+from .turn_arrows import (
+    TurnArrow,
+    TurnKind,
+    arrows_for_mouth,
+    available_turns,
+    turn_arrows,
+    turn_arrows_at_mouth,
+)
 
 __all__ = [
     "DEFAULT_PROFILE",
@@ -51,5 +58,7 @@ __all__ = [
     "lane_markings",
     "node_anchors",
     "arrows_for_mouth",
+    "available_turns",
     "turn_arrows",
+    "turn_arrows_at_mouth",
 ]

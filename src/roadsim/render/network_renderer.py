@@ -20,6 +20,7 @@ from ..road import RoadNetwork, RoadSegment
 from ..road.cap import Cap, CapKind
 from ..road.crosswalk import CrosswalkMark, crosswalk_mark
 from ..road.decal import get as decal_for
+from ..road.junction import Junction
 from ..road.lane import Direction
 from ..road.pavement import build_pavement_bands
 from ..road.transition import build_transition
@@ -37,6 +38,9 @@ from .transition_renderer import draw_transition
 class NetworkRenderer:
     def __init__(self, show_arrows: bool = True) -> None:
         self.show_arrows = show_arrows
+        """Periodic travel-direction chevrons only - an editing aid, not paint.
+        Turn-arrow decals at a junction mouth are real road markings and always
+        draw, the same as a crosswalk."""
 
     def draw(
         self, surface: pygame.Surface, camera: Camera, network: RoadNetwork
@@ -79,8 +83,9 @@ class NetworkRenderer:
                     if mark is None:
                         continue
                     draw_crosswalk(surface, camera, segment.path, mark)
-                    if self.show_arrows:
-                        self._draw_turn_arrows(surface, camera, segment, at_a, mark)
+                    self._draw_turn_arrows(
+                        surface, camera, segment, at_a, mark, junction
+                    )
 
         for cap in network.caps.values():
             self._draw_cap(surface, camera, cap)
@@ -204,6 +209,7 @@ class NetworkRenderer:
         segment: RoadSegment,
         at_a: bool,
         mark: CrosswalkMark,
+        junction: Junction,
     ) -> None:
         """One decal per approaching lane, upstream of the stop line.
 
@@ -215,7 +221,7 @@ class NetworkRenderer:
         s = segment.path.clamp_s(mark.stop_s + away * config.TURN_ARROW_SETBACK)
         frame = segment.path.sample(s)
         profile = segment.profile
-        for arrow in arrows_for_mouth(profile, at_a):
+        for arrow in arrows_for_mouth(profile, at_a, junction, segment.id):
             decal = decal_for(arrow.kind.decal)
             lane_width = profile.lanes[arrow.lane].width
             length = decal.fitted_length(

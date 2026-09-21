@@ -141,6 +141,19 @@ Decals are scaled uniformly - squashing an arrow sideways would make it a
 different marking - so a lane too narrow for the arrow at
 `TURN_ARROW_LENGTH` gets a shorter one, not a thinner one."""
 
+TURN_ARROW_MIN_ANGLE_DEG = 20.0
+"""Below this bend off the arrival direction, an arm reads as the straight-
+ahead continuation rather than a turn worth marking."""
+
+TURN_ARROW_MAX_ANGLE_DEG = 150.0
+"""Above this bend an arm reads as this arm's own gore sibling - the same
+shallow-fork case `GORE_ANGLE_DEG` flags for kerbs - rather than a real turn
+target.
+
+Kept well above 90: an ordinary right-angle crossing sits right at 90, and a
+cutoff pinned there would drop turn arrows off the very junctions that need
+them, the moment a corner is not perfectly square."""
+
 TRANSITION_ARROW_LENGTH = TURN_ARROW_LENGTH
 """Metres, the merge arrow painted where a lane is about to run out - the same
 scale as a turn decal, so one does not read as a different kind of marking."""
