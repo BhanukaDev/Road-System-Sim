@@ -11,6 +11,7 @@ is a single named operation rather than a setter.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from itertools import count
 
@@ -204,6 +205,48 @@ class RoadNetwork:
         first = self.add_segment(node_a, mid.id, before, profile, radius)
         second = self.add_segment(mid.id, node_b, after, profile, radius)
         return first.id, second.id, mid.id
+
+    # -- copying -----------------------------------------------------------
+
+    def copy(self) -> RoadNetwork:
+        """An independent network with the same content and the same next ids.
+
+        What a ghost preview mutates instead of the real thing: a command applied
+        here and rebuilt shows exactly the junctions and trims the same command
+        would produce on the original, because the id counters are copied too -
+        so the segment a preview calls `7` is the segment the commit will call
+        `7`. Profiles are shared, not copied: they are immutable, and a copy
+        would break the `is` identity `serialization` and the tests rely on.
+        Junctions and caps are derived, so they are carried across as they are
+        and simply replaced by the next rebuild at any node the change touches.
+        """
+        clone = RoadNetwork(
+            nodes={
+                nid: RoadNode(node.id, node.position, set(node.segments))
+                for nid, node in self.nodes.items()
+            },
+            segments={},
+            junctions=dict(self.junctions),
+            caps=dict(self.caps),
+            _node_ids=copy.copy(self._node_ids),
+            _segment_ids=copy.copy(self._segment_ids),
+            _dirty=set(self._dirty),
+        )
+        for sid, segment in self.segments.items():
+            twin = RoadSegment(
+                segment.id,
+                segment.node_a,
+                segment.node_b,
+                list(segment.control_points),
+                segment.profile,
+                segment.corner_radius,
+                segment.trim_a,
+                segment.trim_b,
+                segment.pull_a,
+                segment.pull_b,
+            )
+            clone.segments[sid] = twin
+        return clone
 
     # -- queries -----------------------------------------------------------
 

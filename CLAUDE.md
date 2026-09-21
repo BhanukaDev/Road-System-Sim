@@ -28,7 +28,7 @@ src/roadsim/
   road/       lanes, profiles, nodes, segments, junctions, network,
               markings, crosswalks, decals, lane transitions
   render/     camera, grid, curve drawing, network renderer, HUD
-  editor/     commands/undo, snapping, tools, shapers, guides, overlay
+  editor/     commands/undo, snapping, tools, guides, ghost previews, overlay
   ui/         widgets, bars, panels - every bar generated from a registry
   modes/      ways of using the world (view, roads), in modes/__init__.py
   serialization/  versioned JSON schema and file io
@@ -173,8 +173,22 @@ Landed so far:
   order because the three act on different things or answer different
   questions (D19).
 
-Still to come: previews that show the real road, end caps, lane anchors and
-alignment guides; shapers (straight / curve / freeform / continuous), loops,
+- **The preview is the commit, one frame early (D22).** `editor/ghost.py`
+  applies the road's command to `RoadNetwork.copy()`, rebuilds the junctions it
+  touched and hands the overlay the changed subset, which `NetworkRenderer.draw`
+  now accepts. The overlay paints it onto one per-pixel-alpha layer at
+  `config.GHOST_ALPHA`, so the ghost shows the real road: the split, the trims,
+  the crossings at the new mouth, the turning head at the free end. Validity is
+  read off the ghost's own flags in `road/validate.py` - `is_broken`,
+  `Junction.is_degenerate` - plus the one rule the model lacks until crossings
+  form junctions: a road crossing another with no node there. A ghost with a
+  problem is tinted red with the reason beside the thing that is wrong, and the
+  commit reads the same `plan_road` verdict, so a red road cannot be committed.
+  Hovering a road or node lights it (`ToolPreview.highlights`, ids not
+  geometry); before a first point the profile's width follows the cursor as a
+  footprint disc.
+
+Still to come: shapers (straight / curve / freeform / continuous), loops,
 bulldoze and replace; levels, colliders and crossings; then exact junction trims,
 rounded corners, the corner handle and pavements.
 
@@ -182,5 +196,5 @@ rounded corners, the corner handle and pavements.
 showcase - which now includes a shallow gore and a lane taper - and
 `--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D21 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D22 are this
 milestone's.

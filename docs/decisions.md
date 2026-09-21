@@ -728,3 +728,81 @@ is `road/transition.py`'s and needs two segments. Rather than silently
 averaging or quietly dropping one, `profile_for_lane_ends` states the rule -
 the start, the end the user deliberately began from - and
 `tests/test_lane_draw.py` pins it.
+
+## D22. A preview is the network one command ahead, not a drawing of intent
+
+**The symptom.** The draw tool's preview was a one-pixel centreline with lane
+strips painted round it, and "invalid" was a flag set *after* a commit was
+refused. So the user learned a road could not be built by pressing Enter and
+watching nothing happen, and what the strip showed - a constant-width road
+running straight into the target - was not what the commit built: the commit
+split the target, trimmed three arms back to their kerbs, and put a turning
+head on the far end. M3's item 6 ("a road preview is a one-pixel centreline,
+not a road") and item 11 ("what you are connecting to") were both open, and
+Cities: Skylines' ghost - translucent, showing the junction that will form,
+red when it cannot - was the stated reference.
+
+**Alternatives considered.** (a) Draw the previewed road better: lanes plus
+markings plus a cap, computed from the path alone. (b) Write a validator that
+mirrors the rules a commit will hit - too short, too tight, sharp angle - and
+colour the strip by its verdict. (c) Build the road on a scratch copy of the
+network, rebuild the junctions it touches, draw the changed part translucently,
+and read validity off the result's own flags.
+
+**Why (c).** The first two both re-derive, in the tool, things the model
+already knows how to derive, and each is a second answer waiting to disagree
+with the first. A preview drawn from the path alone cannot show a trim, because
+a trim is a property of a junction, and a junction is derived from *all* the
+arms at a node (D5). A validator that mirrors the commit's rules drifts from
+them the day one side changes - and the rules that matter most here are not
+threshold checks anyway but geometric outcomes: whether a gore resolves within
+the budget both arms can give (D13), whether an inner lane edge folds through
+its arc centre (`is_degenerate`), whether the carriageway left between two
+junctions is more than nothing (`is_too_short`). Those are already flags the
+renderer checks every frame. Building the ghost and reading the same flags
+makes "the preview went red" and "the road drew as an error" one event.
+
+**How.** `RoadNetwork.copy()` gives an independent network with the same next
+ids - so the segment the ghost calls 7 is the segment the commit will call 7 -
+sharing profiles, which are immutable, and copying nodes, segments and the
+derived junctions and caps. `editor/ghost.py` applies the command to the copy,
+reads the dirty set the command leaves behind (which is exactly the set
+`rebuild_dirty` retrims, so one set scopes both the rebuild and the drawing),
+rebuilds, and asks `road/validate.py` for the first problem among the touched
+parts. `NetworkRenderer.draw` learned to draw a named subset - the same code
+path, fewer things painted - and `editor/overlay.py` draws that subset onto a
+per-pixel-alpha layer and blits it through once at `config.GHOST_ALPHA`. One
+layer, one alpha, so overlapping ghost polygons do not double-darken at lane
+boundaries. A ghost with a problem has `Color.GHOST_INVALID_TINT` added to
+every pixel before the blit: still lanes, still a junction, unmistakably red.
+
+**The one rule that is not a flag.** Two roads crossing without a node at the
+crossing form nothing today - item 13, step 6's crossing detection. Until a
+crossing *creates* a node it is refused, in `road/validate.py`, using
+`geometry/intersect.py`'s `path_intersections` on the new road against every
+other, skipping only the hit at a node both roads end on. That is the sole rule
+the ghost carries that the model does not; when step 6 lands and a crossing
+becomes a junction, the rule is deleted and nothing else moves.
+
+**A fresh command for the commit.** A command remembers the ids it allocated so
+that redo is byte-identical (`editor/commands.py`). The one the ghost ran has
+therefore already *done* once, on the copy, and running it on the real network
+would be a redo, not a first do. `plan_road` builds a new command each call -
+once per frame for the preview, once more for the commit - which is cheap,
+and it is what keeps the ghost's copy from ever leaking an id into the real
+history. `tests/test_ghost.py` pins that the ghost's network and the committed
+one serialise identically.
+
+**Hovers are ids, not geometry.** `ToolPreview.highlights` carries the road
+a `SEGMENT` snap would split or the node a `NODE`/`LANE` snap would join, as a
+`Highlight(kind, id)`; the overlay looks the thing up and washes its real
+carriageway. Carrying the id means the highlight cannot drift from the road it
+names, and a test can assert what is lit with no window open - the same
+argument `PreviewHandle` made for grabbable points. Before a first point there
+is nothing to ghost, so `ToolPreview.footprint` shows the active profile's
+width as a disc under the cursor: the road type reads before the road exists.
+
+**Cost.** Copy, command, rebuild of two or three junctions and the crossing
+check run in 2-4 ms per frame on the demo network, once per frame regardless
+of how many motion events arrive. The layer is a full-window surface kept
+between frames and cleared only when there is something to put on it.

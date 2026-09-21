@@ -45,9 +45,38 @@ class NetworkRenderer:
         draw, the same as a crosswalk."""
 
     def draw(
-        self, surface: pygame.Surface, camera: Camera, network: RoadNetwork
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        network: RoadNetwork,
+        segment_ids: frozenset[int] | None = None,
+        node_ids: frozenset[int] | None = None,
     ) -> None:
-        drawable = [s for s in network.segments.values() if not s.is_broken]
+        """Draw the network, or just the part of it named.
+
+        `segment_ids` and `node_ids` scope the pass to a subset - the roads a
+        ghost preview created or re-trimmed and the nodes whose junction or cap
+        it rebuilt (`editor/ghost.py`). `None` for either means all of them.
+        Everything a subset junction needs - the arms it trims, the bands it
+        runs - is still read from the whole network, so a partial draw is the
+        full draw with fewer things painted, never a different drawing.
+        """
+        segments = [
+            s
+            for s in network.segments.values()
+            if segment_ids is None or s.id in segment_ids
+        ]
+        junctions = [
+            j
+            for j in network.junctions.values()
+            if node_ids is None or j.node_id in node_ids
+        ]
+        caps = [
+            c
+            for c in network.caps.values()
+            if node_ids is None or c.node_id in node_ids
+        ]
+        drawable = [s for s in segments if not s.is_broken]
         tapers = {
             segment.id: median_tapers(
                 segment,
@@ -74,7 +103,7 @@ class NetworkRenderer:
             for taper in tapers[segment.id]:
                 draw_median_taper(surface, camera, taper)
 
-        for junction in network.junctions.values():
+        for junction in junctions:
             draw_junction(surface, camera, junction)
             if junction.is_degenerate:
                 # Nothing derived from these mouths is trustworthy - a pavement
@@ -100,14 +129,14 @@ class NetworkRenderer:
                         surface, camera, segment, at_a, mark, junction
                     )
 
-        for cap in network.caps.values():
+        for cap in caps:
             self._draw_cap(surface, camera, cap)
 
         if self.show_arrows:
             for segment in drawable:
                 self._draw_arrows(surface, camera, segment)
 
-        for segment in network.segments.values():
+        for segment in segments:
             if segment.is_broken:
                 self._draw_error(surface, camera, segment)
 

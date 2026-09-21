@@ -20,8 +20,10 @@ from ..road.network import RoadNetwork
 from ..road.presets import DEFAULT_PROFILE, PROFILES
 from ..road.profile import RoadProfile
 from .commands import Command, History
+from .ghost import Ghost
 from .guides import Guide
 from .handle import PreviewHandle
+from .highlight import Highlight
 from .snapping import Snap, Snapper
 
 
@@ -87,6 +89,18 @@ class ToolPreview:
     from, and so a test can assert what is on offer with no window open."""
     profile: RoadProfile | None = None
     """Cross-section to use when drawing the preview roads."""
+    ghost: Ghost | None = None
+    """The network one command ahead - the real road, junction and caps the
+    commit would produce, drawn translucently (`editor/ghost.py`). When set it
+    supersedes drawing `paths` as lanes; `paths` still carries the centreline
+    for the length and angle readouts."""
+    highlights: list[Highlight] = field(default_factory=list)
+    """What under the cursor is about to be acted on - the road that would be
+    split, the node that would be joined. Ids, looked up by the overlay."""
+    footprint: Vec2 | None = None
+    """Where a road would *start* if the user clicked now, shown as a disc of
+    the active profile's width - so the road type reads before a first point
+    exists to draw a ghost from."""
 
     @property
     def is_empty(self) -> bool:
@@ -99,6 +113,9 @@ class ToolPreview:
             or self.angles
             or self.guides
             or self.handles
+            or self.ghost
+            or self.highlights
+            or self.footprint
         )
 
 

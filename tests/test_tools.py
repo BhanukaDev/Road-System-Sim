@@ -7,10 +7,12 @@ code path with no display, no event loop and no mouse.
 
 from __future__ import annotations
 
+import pygame
 import pytest
 
 from roadsim.editor.commands import Composite
 from roadsim.editor.context import EditorContext, Selection
+from roadsim.editor.highlight import Highlight
 from roadsim.editor.snapping import Snap, SnapKind
 from roadsim.editor.tools.draw_road import DrawRoadTool, build_road_command
 from roadsim.editor.tools.move_node import MoveNodeTool
@@ -324,3 +326,122 @@ def test_replacing_the_network_clears_the_history(ctx):
     assert not ctx.history.can_undo
     assert ctx.selection.is_empty
     assert ctx.snapper.network is ctx.network
+
+
+# -- the ghost: the preview is the commit, one frame early (D22) -----------
+
+
+def test_preview_carries_a_ghost_with_the_junction_the_click_would_form(ctx):
+    """Ending on a road previews the T - the split, the trims, three arms."""
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 60.0)]
+    road = ctx.network.segments[1]
+    s = road.path.length / 2.0
+    tool._hover = Snap(SnapKind.SEGMENT, road.path.sample(s).position, (road.id, s))
+    ctx.cursor = tool._hover.attach_position
+
+    preview = tool.preview(ctx)
+
+    assert not preview.invalid
+    assert preview.ghost is not None
+    junctions = [
+        preview.ghost.network.junctions[n]
+        for n in preview.ghost.nodes
+        if n in preview.ghost.network.junctions
+    ]
+    assert len(junctions) == 1 and len(junctions[0].ends) == 3
+    assert road.id in ctx.network.segments  # the real road was not split
+
+
+def test_preview_goes_red_live_when_the_road_would_cross_another(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(10.0, -40.0)]
+    ctx.cursor = Vec2(10.0, 40.0)
+
+    preview = tool.preview(ctx)
+
+    assert preview.invalid
+    assert "crosses" in preview.reason
+    assert preview.ghost is not None and preview.ghost.invalid
+
+
+def test_preview_goes_red_live_when_the_road_is_too_short(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 50.0)]
+    ctx.cursor = Vec2(0.0, 50.2)
+
+    preview = tool.preview(ctx)
+
+    assert preview.invalid
+    assert preview.reason == "road is too short"
+    assert preview.ghost is None  # refused before there was anything to build
+
+
+def test_a_red_preview_cannot_be_committed(ctx):
+    """The ghost's verdict and the commit's are the same verdict."""
+    tool = DrawRoadTool()
+    tool.points = [Vec2(10.0, -40.0), Vec2(10.0, 40.0)]
+    tool._commit(ctx)
+    assert ctx.history.depth == 0
+    assert "crosses" in ctx.status
+
+
+def test_a_refused_commit_keeps_its_reason_until_the_cursor_moves(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 50.0), Vec2(0.0, 50.2)]
+    tool._commit(ctx)
+    assert tool.preview(ctx).reason == "road is too short"
+
+    tool.handle_event(
+        pygame.event.Event(pygame.MOUSEMOTION, pos=(700, 100), rel=(0, 0), buttons=(0, 0, 0)),
+        ctx,
+    )
+    assert tool.preview(ctx).reason != "road is too short"
+
+
+def test_previewing_leaves_the_network_untouched(ctx):
+    before = dumps(ctx.network)
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 60.0)]
+    road = ctx.network.segments[1]
+    s = road.path.length / 2.0
+    tool._hover = Snap(SnapKind.SEGMENT, road.path.sample(s).position, (road.id, s))
+    ctx.cursor = tool._hover.attach_position
+    tool.preview(ctx)
+    assert dumps(ctx.network) == before
+    assert not ctx.network.dirty_nodes
+    assert ctx.history.depth == 0
+
+
+# -- hover ----------------------------------------------------------------
+
+
+def test_hovering_a_road_highlights_it(ctx):
+    tool = DrawRoadTool()
+    ctx.cursor = Vec2(10.0, 0.1)
+    preview = tool.preview(ctx)
+    assert preview.highlights == [Highlight.segment(1)]
+
+
+def test_hovering_a_node_highlights_it(ctx):
+    node = ctx.network.node_at(Vec2(-60.0, 0.0))
+    tool = DrawRoadTool()
+    ctx.cursor = node.position
+    preview = tool.preview(ctx)
+    assert preview.highlights == [Highlight.node(node.id)]
+
+
+def test_hovering_open_space_highlights_nothing_and_shows_the_footprint(ctx):
+    tool = DrawRoadTool()
+    ctx.cursor = Vec2(0.0, 300.0)
+    preview = tool.preview(ctx)
+    assert preview.highlights == []
+    assert preview.footprint == ctx.cursor
+    assert preview.profile is ctx.profile
+
+
+def test_the_footprint_goes_once_a_first_point_is_placed(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 300.0)]
+    ctx.cursor = Vec2(40.0, 300.0)
+    assert tool.preview(ctx).footprint is None

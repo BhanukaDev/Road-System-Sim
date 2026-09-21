@@ -26,12 +26,12 @@ answers:
 | 3   | One editor, no modes - no way to look without touching                                   | `scenes/editor.py`                  |
 | 4   | No bulldozer, so no way to see what a delete will take before it takes it                | -                                   |
 | 5   | One drawing behaviour, not CS2's straight / curve / complex / continuous, and no replace | `tools/draw_road.py`                |
-| 6   | A road preview is a one-pixel centreline, not a road                                     | `ToolPreview.paths`                 |
+| 6   | ~~A road preview is a one-pixel centreline, not a road~~ **done** (D22)                  | `ToolPreview.paths`                 |
 | 7   | A curve gives no construction lines while you place it                                   | -                                   |
 | 8   | Dead ends are square - no turning head, no terminal                                      | -                                   |
 | 9   | No alignment guides near other roads                                                     | -                                   |
 | 10  | No collision detection: extreme shapes and self-overlap both pass                        | -                                   |
-| 11  | No live measurements - length, angle, what you are connecting to                         | -                                   |
+| 11  | ~~No live measurements - length, angle, what you are connecting to~~ **done**            | -                                   |
 | 12  | ~~Snapping is centre-only, so different lane counts always centre-align~~ **done**       | `editor/snapping.py`                |
 | 13  | Two roads crossing without a shared node **do not form a junction**                      | nothing detects crossings           |
 | 14  | No height, so no bridges or overpasses                                                   | -                                   |
@@ -112,6 +112,16 @@ Each step leaves the app runnable and the suite green.
    heading (D5) - the endpoint it seeds is an ordinary free node, never a lane
    connection. A road drawn off the end of a two-lane road now lines up with
    the lane it continues instead of snapping back to the centreline.
+
+   The last slice is the ghost itself (D22). `RoadNetwork.copy()` and
+   `editor/ghost.py` build the road on a scratch network and hand the overlay
+   the changed subset; `NetworkRenderer.draw` takes a subset; the overlay
+   paints it on one alpha layer, tinted red when `road/validate.py` finds a
+   problem in the result. `ToolPreview.highlights` lights the road or node the
+   cursor would act on and `ToolPreview.footprint` shows the profile's width
+   before a first point. The snap-mark `if`-chain in the overlay is now a
+   registry (`SNAP_MARKS`). Item 6 and item 11 close here; a road that would
+   cross another with no node is refused until step 6 makes it a junction.
 
 5. **Tool modes, loops, bulldoze, replace.** `editor/shapers/`;
    `editor/road_build.py`; `editor/impact.py`; the bulldoze and replace tools.

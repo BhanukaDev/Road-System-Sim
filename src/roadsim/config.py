@@ -214,6 +214,17 @@ DRAG_THRESHOLD_PX = 6.0
 EDITOR_ZOOM = 6.0
 """Pixels per metre the editor opens at - wide enough to watch a junction form."""
 
+GHOST_ALPHA = 150
+"""0-255. How solid a ghost preview - the road, junction and caps a commit would
+produce - is drawn over the real network. Translucent enough that what is
+already there reads through it, solid enough that lane colours still mean
+something."""
+HOVER_ALPHA = 70
+"""0-255. The wash over a road or node the cursor is about to act on."""
+FOOTPRINT_ALPHA = 90
+"""0-255. The disc of the active profile's width that follows the cursor
+before a first point is placed."""
+
 MIN_ROAD_LENGTH = 1.0
 """Metres. Shorter than this and there is no road, only a mistake."""
 MIN_LANE_CLEARANCE = 0.25
@@ -287,6 +298,12 @@ class Color:
     SELECTION = (250, 214, 130)
     PREVIEW = (240, 196, 84)
     PREVIEW_DIM = (138, 120, 70)
+    GHOST_INVALID_TINT = (150, 30, 30)
+    """Added to every pixel of a ghost that cannot be built, so the lanes stay
+    legible as lanes while the whole road unmistakably reads red."""
+    HOVER = (120, 190, 226)
+    """The road or node the cursor is about to connect to."""
+    FOOTPRINT = (240, 196, 84)
     SNAP_NODE = (120, 226, 160)
     SNAP_SEGMENT = (120, 190, 226)
     SNAP_ANCHOR = (226, 190, 120)
