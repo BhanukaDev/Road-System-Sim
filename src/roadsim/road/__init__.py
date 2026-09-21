@@ -10,6 +10,7 @@ from .junction import Junction, SegmentEnd, build_junction
 from .lane import Direction, LaneSpec, LaneType
 from .network import RoadNetwork
 from .node import RoadNode
+from .pavement import PavementBand, build_pavement_bands
 from .presets import DEFAULT_PROFILE, PROFILES
 from .profile import RoadProfile
 from .segment import RoadSegment
@@ -24,6 +25,7 @@ __all__ = [
     "Junction",
     "LaneSpec",
     "LaneType",
+    "PavementBand",
     "RoadNetwork",
     "RoadNode",
     "RoadProfile",
@@ -31,6 +33,7 @@ __all__ = [
     "SegmentEnd",
     "build_cap",
     "build_junction",
+    "build_pavement_bands",
     "end_anchors",
     "node_anchors",
 ]

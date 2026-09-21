@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from roadsim.geometry import Vec2
+from roadsim import config
+from roadsim.geometry import ArcSegment, Path, Vec2
 from roadsim.road.junction import SegmentEnd, build_junction
 from roadsim.road.lane import Direction, LaneSpec, LaneType
 from roadsim.road.network import RoadNetwork
@@ -217,3 +218,123 @@ def test_a_single_end_builds_no_junction():
 def test_trims_leave_the_carriageway_intact_on_a_normal_crossing(profile):
     net = crossing(east_west=profile, north_south=profile)
     assert all(not s.is_too_short for s in net.segments.values())
+
+
+# -- exact trims, replacing the M2 tangent-ray approximation ---------------
+
+
+def test_exact_trim_follows_a_curved_kerb_instead_of_a_straight_tangent():
+    """The M2 debt this closes: a curve starting right at the node used to
+    trim against the straight tangent line it left on, not its own shape.
+
+    A shallow corner is the case that shows it: the straight-tangent version
+    has nowhere real to cross, so it runs into `JUNCTION_MAX_TRIM_FACTOR`'s
+    cap instead of an answer. Bending the same arm's kerb away finds a real,
+    smaller crossing well inside that cap - a different number, not just a
+    smaller share of the same approximation.
+
+    `fit_polyline` never puts an arc at a segment's very end - only *between*
+    two straights - so the only way to get one there for a test is to replace
+    `path` directly after construction.
+    """
+    tilted = Vec2(-45.0, 12.0)  # shallow relative to the west arm below
+
+    def trim_with(path_override: Path | None) -> float:
+        net = RoadNetwork()
+        net.connect(Vec2(-50.0, 0.0), ORIGIN, NARROW)
+        arm = net.connect(ORIGIN, tilted, NARROW)
+        if path_override is not None:
+            arm.path = path_override
+        net.rebuild_all()
+        return arm.trim_a
+
+    straight_trim = trim_with(None)
+    assert approx(straight_trim, config.JUNCTION_MAX_TRIM_FACTOR * NARROW.half_width, 1e-6)
+
+    entry_dir = tilted.normalized()
+    bent = ArcSegment.from_tangent_points(ORIGIN, entry_dir, Vec2(-60.0, 40.0), 20.0)
+    curved_trim = trim_with(Path.of(bent))
+
+    assert not approx(curved_trim, straight_trim, 1e-6)
+    assert curved_trim < straight_trim
+
+
+# -- rounded corners --------------------------------------------------------
+
+
+def test_every_corner_of_a_four_way_crossing_is_rounded():
+    net = crossing()
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    assert len(junction.corners) == len(junction.ends)
+    assert all(corner is not None for corner in junction.corners)
+
+
+def test_a_corner_fillet_is_tangent_to_both_kerbs():
+    net = crossing()
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    n = len(junction.ends)
+    for i, fillet in enumerate(junction.corners):
+        a, b = junction.ends[i], junction.ends[(i + 1) % n]
+        into, out_of = -a.outgoing_dir, b.outgoing_dir
+        assert approx(fillet.arc.start.tangent.cross(into), 0.0, 1e-6)
+        assert approx(fillet.arc.end.tangent.cross(out_of), 0.0, 1e-6)
+
+
+def test_a_narrow_crossings_corners_are_clamped_below_the_default_radius():
+    """Each arm's own half-width already eats most of the straight kerb a
+    5.5 m-wide road's corner has to give, leaving less than the 6 m default -
+    so the room clamps it, exactly as `fit_polyline`'s fillets clamp on a
+    short leg."""
+    net = crossing()
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    for fillet in junction.corners:
+        assert fillet.radius < config.JUNCTION_CORNER_RADIUS
+        assert approx(fillet.radius, NARROW.half_width, 1e-6)
+
+
+def test_a_roomy_crossings_corners_take_the_default_radius():
+    net = crossing(east_west=WIDE, north_south=WIDE)
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    for fillet in junction.corners:
+        assert approx(fillet.radius, config.JUNCTION_CORNER_RADIUS, 1e-6)
+
+
+# -- the corner handle -------------------------------------------------------
+
+
+def _east_arm(net: RoadNetwork, hub: int):
+    return next(
+        seg
+        for seg, at_a in net.segments_at(hub)
+        if at_a and seg.outgoing_dir(at_a).dot(Vec2(1.0, 0.0)) > 0.9
+    )
+
+
+def test_a_pulled_arm_is_trimmed_to_exactly_its_pull():
+    net = crossing()
+    hub = net.node_at(ORIGIN).id
+    east_arm = _east_arm(net, hub)
+    east_arm.pull_a = 9.0
+    net.rebuild_all()
+    assert approx(east_arm.trim_a, 9.0, 1e-6)
+
+
+def test_pulling_every_arm_out_grows_the_corners_to_match():
+    """Decision 7: the handle sets the trim and the radius together - pull
+    every arm back the same amount and every corner (all 90 degrees, here)
+    should grow to exactly that pull rather than staying clamped at whatever
+    it derived before."""
+    net = crossing()
+    hub = net.node_at(ORIGIN).id
+    before = next(f.radius for f in net.junctions[hub].corners if f is not None)
+
+    pulled = before * 4.0
+    for segment, at_a in net.segments_at(hub):
+        if at_a:
+            segment.pull_a = pulled
+        else:
+            segment.pull_b = pulled
+    net.rebuild_all()
+
+    after = net.junctions[hub].corners
+    assert all(f is not None and approx(f.radius, pulled, 1e-6) for f in after)

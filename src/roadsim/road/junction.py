@@ -4,11 +4,13 @@ Nothing here is ever stored. A junction is recomputed whenever its node is
 dirty, which means a node drag or a profile change cannot leave stale geometry
 behind - the failure mode that makes stored junctions a correctness problem.
 
-What it produces is two things:
+What it produces is three things:
 
 * a **trim** for each segment end - how far that road must pull back so its
   carriageway stops at the junction mouth rather than ploughing through it;
-* a **polygon** for the junction surface, flush with those pulled-back mouths.
+* a **polygon** for the junction surface, flush with those pulled-back mouths;
+* a **corner** rounding the gap between each pair of adjacent mouths, tangent
+  to both kerbs and clamped by whichever arm has less straight to give.
 """
 
 from __future__ import annotations
@@ -17,10 +19,18 @@ import math
 from dataclasses import dataclass, field
 
 from .. import config
-from ..geometry import Vec2, ray_ray
+from ..geometry import (
+    Curve,
+    DegenerateOffsetError,
+    Fillet,
+    Vec2,
+    corner_fillet,
+    curve_curve,
+    deflection,
+    ray_ray,
+)
 from .profile import RoadProfile
 from .segment import RoadSegment
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +75,10 @@ class Junction:
     trims: dict[tuple[int, bool], float] = field(default_factory=dict)
     """(segment id, at_a) -> metres that end must pull back."""
     polygon: tuple[Vec2, ...] = ()
+    corners: tuple[Fillet | None, ...] = ()
+    """One entry per CCW-adjacent pair of ends: `corners[i]` rounds the gap
+    between `ends[i]` and `ends[(i + 1) % len(ends)]`. `None` where there is no
+    corner worth rounding - squeezed below `MIN_RADIUS`, or no room at all."""
 
     @property
     def is_crossing(self) -> bool:
@@ -88,10 +102,12 @@ def build_junction(
     if len(ends) < 2 or _is_through_joint(ends, segments):
         return None
 
-    trims = _solve_trims(ends)
-    lookup = {(seg.id, at_a): trims[(seg.id, at_a)] for seg, at_a in segments}
+    seg_by_key = {(seg.id, at_a): seg for seg, at_a in segments}
+    demand, corner_geoms = _solve_trims(ends, seg_by_key, position)
+    lookup = {(seg.id, at_a): demand[(seg.id, at_a)] for seg, at_a in segments}
     polygon = _polygon(ends, segments, lookup)
-    return Junction(node_id, position, tuple(ends), lookup, polygon)
+    corners = _build_corners(corner_geoms, lookup, seg_by_key)
+    return Junction(node_id, position, tuple(ends), lookup, polygon, corners)
 
 
 def _angle_key(end: SegmentEnd) -> tuple[float, int, bool]:
@@ -116,50 +132,165 @@ def _is_through_joint(
     return ends[0].outgoing_dir.dot(ends[1].outgoing_dir) < -0.999
 
 
-def _solve_trims(ends: list[SegmentEnd]) -> dict[tuple[int, bool], float]:
+def _solve_trims(
+    ends: list[SegmentEnd],
+    seg_by_key: dict[tuple[int, bool], RoadSegment],
+    node_position: Vec2,
+) -> tuple[dict[tuple[int, bool], float], list[tuple[Vec2, SegmentEnd, SegmentEnd] | None]]:
     """Each end pulls back far enough to clear every neighbour it shares a
-    corner with, and never less than its own half-width."""
+    corner with, and never less than its own half-width.
+
+    Alongside the trims, this returns the corner apex and the two ends either
+    side of it for every CCW-adjacent pair - the geometry `_build_corners`
+    needs to round each one, computed once rather than twice.
+    """
+    n = len(ends)
     demand = {(e.segment_id, e.at_a): e.half_width for e in ends}
+    corner_geoms: list[tuple[Vec2, SegmentEnd, SegmentEnd] | None] = [None] * n
     for i, a in enumerate(ends):
-        b = ends[(i + 1) % len(ends)]
+        b = ends[(i + 1) % n]
         if a is b:
             continue
-        for end, reach in _pair_demand(a, b):
-            key = (end.segment_id, end.at_a)
-            demand[key] = max(demand[key], reach)
-    return demand
+        seg_a, seg_b = seg_by_key[(a.segment_id, a.at_a)], seg_by_key[(b.segment_id, b.at_a)]
+        result = _pair_demand(a, b, seg_a, seg_b, node_position)
+        if result is None:
+            continue
+        apex, reach_a, reach_b = result
+        key_a, key_b = (a.segment_id, a.at_a), (b.segment_id, b.at_a)
+        demand[key_a] = max(demand[key_a], reach_a)
+        demand[key_b] = max(demand[key_b], reach_b)
+        corner_geoms[i] = (apex, a, b)
+    return demand, corner_geoms
 
 
-def _pair_demand(a: SegmentEnd, b: SegmentEnd) -> list[tuple[SegmentEnd, float]]:
-    """How far `a` and `b` must pull back so their facing kerbs meet at a point.
+def _pair_demand(
+    a: SegmentEnd,
+    b: SegmentEnd,
+    seg_a: RoadSegment,
+    seg_b: RoadSegment,
+    node_position: Vec2,
+) -> tuple[Vec2, float, float] | None:
+    """Where `a`'s left kerb and `b`'s right kerb actually meet, and how far
+    back each must pull to clear it.
 
     `b` is the next end counter-clockwise, so it sits to `a`'s left: the corner
     between them is bounded by `a`'s left edge and `b`'s right edge.
 
-    **M2 approximation:** these are the straight tangent *rays* at the node, not
-    the real curves. Fillet clamping guarantees every segment keeps some
-    straight run at each end, so roads are near-straight where this matters.
-    Exact curve-curve intersection is M3.
-
-    The reach is **capped**. As two arms approach collinear their kerbs approach
-    parallel, so the crossing point runs off toward infinity - and a junction
-    computed from it swallows the roads feeding it. The cap keeps a shallow
-    corner blunt instead, which is wrong by a little rather than by a kilometre.
-    M3 fillets the corner properly and the cap goes with the approximation.
+    The kerbs are each segment's own end piece (`path.pieces[0]` or `[-1]`),
+    offset exactly (D1) - not the straight tangent rays M2 used, so a curve
+    starting right at the node trims against its real shape instead of the line
+    it left on. The tangent-ray version survives only as the fallback for when
+    the exact kerbs do not cross nearby: two arms at a shallow angle have kerbs
+    that run close to parallel, and a corner handle's pull overrides either
+    side outright regardless of where the kerbs meet.
     """
-    hit = ray_ray(
-        a.outgoing_dir.rot90() * a.extent_left,
-        a.outgoing_dir,
-        b.outgoing_dir.rot90() * -b.extent_right,
-        b.outgoing_dir,
-    )
-    if hit is None:
-        return []
+    apex = _exact_apex(seg_a, a, seg_b, b, node_position)
+    if apex is None:
+        apex = ray_ray(
+            node_position + a.outgoing_dir.rot90() * a.extent_left,
+            a.outgoing_dir,
+            node_position + b.outgoing_dir.rot90() * -b.extent_right,
+            b.outgoing_dir,
+        )
+    if apex is None:
+        return None
+
     limit = config.JUNCTION_MAX_TRIM_FACTOR * max(a.half_width, b.half_width)
-    return [
-        (a, min(hit.dot(a.outgoing_dir), limit)),
-        (b, min(hit.dot(b.outgoing_dir), limit)),
-    ]
+    reach_a = min(_reach(seg_a, a.at_a, apex), limit)
+    reach_b = min(_reach(seg_b, b.at_a, apex), limit)
+
+    pull_a, pull_b = seg_a.pull_at(a.at_a), seg_b.pull_at(b.at_a)
+    if pull_a is not None:
+        reach_a = max(pull_a, a.half_width)
+    if pull_b is not None:
+        reach_b = max(pull_b, b.half_width)
+    return apex, reach_a, reach_b
+
+
+def _exact_apex(
+    seg_a: RoadSegment, a: SegmentEnd, seg_b: RoadSegment, b: SegmentEnd, node_position: Vec2
+) -> Vec2 | None:
+    """The real crossing of `a`'s left kerb and `b`'s right kerb, or `None` when
+    there is none nearby - parallel-enough kerbs, or a kerb offset that would
+    collapse the arc it comes from (D1's `DegenerateOffsetError`)."""
+    try:
+        kerb_a = _kerb_piece(seg_a, a, left=True)
+        kerb_b = _kerb_piece(seg_b, b, left=False)
+    except DegenerateOffsetError:
+        return None
+    hits = curve_curve(kerb_a, kerb_b)
+    if not hits:
+        return None
+    return min(hits, key=lambda hit: hit.point.distance_to(node_position)).point
+
+
+def _kerb_piece(segment: RoadSegment, end: SegmentEnd, *, left: bool) -> Curve:
+    """The segment's own end piece, offset out to the kerb `end` names.
+
+    Only the one piece nearest the node - `fit_polyline` guarantees some
+    straight run at every end, so the corner this feeds is almost always
+    against that straight, and never against a piece the node isn't part of.
+    """
+    piece = segment.path.pieces[0] if end.at_a else segment.path.pieces[-1]
+    return piece.offset(_physical_offset(end, left=left))
+
+
+def _physical_offset(end: SegmentEnd, *, left: bool) -> float:
+    """`end.extent_left`/`extent_right` are already flipped for the view from
+    this end (`SegmentEnd.of`); a piece offsets relative to its own fixed A->B
+    frame instead, so the flip has to be undone here to get the same physical
+    kerb either way."""
+    magnitude = end.extent_left if left else end.extent_right
+    return magnitude if left == end.at_a else -magnitude
+
+
+def _reach(segment: RoadSegment, at_a: bool, point: Vec2) -> float:
+    """Arc length from the node to `point`'s projection onto the end piece.
+
+    Works for a straight or a curved end piece alike: `Curve.project` measures
+    along the piece's own parameterisation, and offsetting never changes that
+    parameterisation (a line keeps its direction, an arc keeps its centre and
+    angles), so the same call answers this for an exact kerb hit or a ray
+    fallback's near-miss.
+    """
+    piece = segment.path.pieces[0] if at_a else segment.path.pieces[-1]
+    s_local = piece.project(point)
+    return s_local if at_a else piece.length - s_local
+
+
+def _build_corners(
+    corner_geoms: list[tuple[Vec2, SegmentEnd, SegmentEnd] | None],
+    trims: dict[tuple[int, bool], float],
+    seg_by_key: dict[tuple[int, bool], RoadSegment],
+) -> tuple[Fillet | None, ...]:
+    """One fillet per corner, tangent to both kerbs and clamped by whichever
+    arm has the less straight kerb to give (item 8: "clamped by the corner
+    angle" falls out of `corner_fillet` itself, since a sharper turn eats more
+    straight at any given radius)."""
+    corners: list[Fillet | None] = []
+    for geom in corner_geoms:
+        if geom is None:
+            corners.append(None)
+            continue
+        apex, a, b = geom
+        into, out_of = -a.outgoing_dir, b.outgoing_dir
+        pull_a = seg_by_key[(a.segment_id, a.at_a)].pull_at(a.at_a)
+        pull_b = seg_by_key[(b.segment_id, b.at_a)].pull_at(b.at_a)
+        radius = _target_radius(deflection(into, out_of), pull_a, pull_b)
+        room_in = trims[(a.segment_id, a.at_a)]
+        room_out = trims[(b.segment_id, b.at_a)]
+        corners.append(corner_fillet(apex, into, out_of, radius, room_in, room_out))
+    return tuple(corners)
+
+
+def _target_radius(phi: float, pull_a: float | None, pull_b: float | None) -> float:
+    """A corner handle's pull is a tangent length (item 7): the distance back
+    from the corner, not a radius. `radius * tan(phi / 2) == tangent_length` is
+    `corner_fillet`'s own formula, inverted here so a pull sets both together -
+    drag the handle out and the radius grows to match, exactly."""
+    half = math.tan(phi / 2.0)
+    candidates = [pull / half for pull in (pull_a, pull_b) if pull is not None and half > 1e-9]
+    return min(candidates) if candidates else config.JUNCTION_CORNER_RADIUS
 
 
 def _polygon(

@@ -36,6 +36,10 @@ class RoadSegment:
     corner_radius: float = config.DEFAULT_CORNER_RADIUS
     trim_a: float = 0.0
     trim_b: float = 0.0
+    pull_a: float | None = None
+    """Corner-handle override for how far this end pulls back at a junction.
+    `None` means derive it from the real kerb geometry, like `trim_a` itself."""
+    pull_b: float | None = None
     path: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -60,6 +64,9 @@ class RoadSegment:
 
     def ends_at(self, node_id: int) -> bool:
         return node_id in (self.node_a, self.node_b)
+
+    def pull_at(self, at_a: bool) -> float | None:
+        return self.pull_a if at_a else self.pull_b
 
     def is_at_a(self, node_id: int) -> bool:
         """True when `node_id` is this segment's A end.

@@ -18,8 +18,10 @@ from ..geometry import Vec2
 from ..road import RoadNetwork, RoadSegment
 from ..road.cap import Cap, CapKind
 from ..road.lane import Direction
+from ..road.pavement import build_pavement_bands
 from .camera import Camera
 from .curves import to_screen_points
+from .junction_renderer import draw_junction, draw_pavement_band
 from .lane_style import LAYERS, style_for
 
 
@@ -37,7 +39,13 @@ class NetworkRenderer:
                 self._draw_lanes(surface, camera, segment, layer)
 
         for junction in network.junctions.values():
-            self._draw_polygon(surface, camera, junction.polygon)
+            draw_junction(surface, camera, junction)
+            seg_by_key = {
+                (seg.id, at_a): seg
+                for seg, at_a in network.segments_at(junction.node_id)
+            }
+            for band in build_pavement_bands(junction, seg_by_key):
+                draw_pavement_band(surface, camera, band)
 
         for cap in network.caps.values():
             self._draw_cap(surface, camera, cap)
@@ -72,15 +80,6 @@ class NetworkRenderer:
             pygame.draw.polygon(surface, style.fill, outline)
             if style.edge is not None:
                 pygame.draw.polygon(surface, style.edge, outline, 1)
-
-    def _draw_polygon(
-        self, surface: pygame.Surface, camera: Camera, polygon: tuple[Vec2, ...]
-    ) -> None:
-        if len(polygon) < 3:
-            return
-        points = to_screen_points(camera, list(polygon))
-        pygame.draw.polygon(surface, config.Color.JUNCTION_FILL, points)
-        pygame.draw.polygon(surface, config.Color.JUNCTION_EDGE, points, 1)
 
     def _draw_cap(self, surface: pygame.Surface, camera: Camera, cap: Cap) -> None:
         if cap.kind is CapKind.TERMINAL:

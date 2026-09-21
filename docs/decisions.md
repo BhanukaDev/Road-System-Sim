@@ -250,3 +250,44 @@ between samples, and every rejection test built on it is only sound if the box i
 true bound. An arc's box is its endpoints plus whichever of the four axis extremes
 its sweep actually covers.
 
+---
+
+## D12. A junction corner is filleted, and a corner handle is a tangent length
+
+M2 trimmed a junction against the straight tangent *rays* at a node, capped
+against a shallow angle's crossing running off toward infinity, and left every
+corner between two arms a flat cut. D11's exact curve intersection retires the
+first part: `_pair_demand` now crosses each arm's own end piece, offset out to
+its real kerb, and only falls back to the tangent ray when that local search
+finds nothing - a kerb too near parallel to cross within the piece at all, or
+whose offset would collapse the arc it comes from. The ray-and-cap pair does
+not go away; a shallow angle is still real, and the cap is still what keeps it
+from swallowing the roads feeding it.
+
+**The corner itself is filleted with the same `corner_fillet` `fit_polyline`
+already uses** - one function, three callers, so a lane edge, a drawn road's
+corner and a junction's corner are tangent to their straights by the same
+closed-form arithmetic. The room each side can give is its own final trim, so
+the same clamp that keeps `fit_polyline`'s fillets honest about a short leg
+keeps a junction's corners honest about a narrow arm.
+
+**A corner handle's pull is a tangent length, not a radius** (`RoadSegment.
+pull_a`/`pull_b`, `None` meaning derive it). `radius * tan(deflection / 2) ==
+tangent_length` is `corner_fillet`'s own formula, inverted so a pull sets the
+trim and the radius together: drag the handle out and the corner opens up to
+match, rather than the radius staying pinned to a default while a straight run
+opens up in between. Storing a tangent length instead of a radius is also what
+lets a pull override the trim on its own, independent of whether the corner
+it feeds ever gets rounded at all.
+
+Pavement bands (`road/pavement.py`) follow the same fillet arc outward by one
+sidewalk width, concentric by construction - `ArcSegment.offset` guarantees
+that, the same guarantee every lane ribbon already relies on. A corner with no
+sidewalk on either connecting arm gets no band, not an empty one.
+
+**Schema note:** `pull_a`/`pull_b` are written now, ahead of the `level` field
+the milestone plan bundled them with, because nothing about them needs a level
+to exist. They are additive and optional - omitted entirely when unset - so the
+save format did not need a version bump to gain them.
+
+

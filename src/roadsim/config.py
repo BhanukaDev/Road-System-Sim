@@ -28,7 +28,13 @@ JUNCTION_MAX_TRIM_FACTOR = 3.0
 arm's half-width. Two arms meeting at a shallow angle have kerbs that cross
 almost at infinity, so the raw intersection is unbounded; without this, dragging
 a node to a shallow angle inflates the junction until it eats its own roads.
-M3's corner fillets replace the straight-ray intersection and this cap with it."""
+Still needed even with exact curve-curve trimming: it is what bounds the
+tangent-ray fallback for kerbs too near parallel to cross within either arm's
+end piece."""
+
+JUNCTION_CORNER_RADIUS = 6.0
+"""Metres. Default fillet radius rounding a junction corner, before a user's
+corner-handle pull or the room either arm has to give clamps it down."""
 
 MIN_CARRIAGEWAY = 1.0
 """Metres. Below this a segment is all junction and has no road left; it is

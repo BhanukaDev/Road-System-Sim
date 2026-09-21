@@ -35,13 +35,14 @@ answers:
 | 12  | Snapping is centre-only, so different lane counts always centre-align                    | `editor/snapping.py`                |
 | 13  | Two roads crossing without a shared node **do not form a junction**                      | nothing detects crossings           |
 | 14  | No height, so no bridges or overpasses                                                   | -                                   |
-| 15  | Junctions have no pavement and square corners                                            | `road/junction.py`                  |
+| 15  | ~~Junctions have no pavement and square corners~~ **done**                               | `road/junction.py`                  |
 | 16  | "Panning not working"                                                                    | `app.py`                            |
 
-Plus the two debts `CLAUDE.md` already recorded against M2 - exact curve-curve
-junction intersection instead of the straight-ray approximation and its trim cap,
-and splitting a road where a new one _crosses_ it. They are not separate errands:
-they are the foundation under 10, 13 and 15.
+Plus the two debts `CLAUDE.md` already recorded against M2 - ~~exact curve-curve
+junction intersection instead of the straight-ray approximation and its trim
+cap~~ **done**, and splitting a road where a new one _crosses_ it. They are not
+separate errands: they were the foundation under 10, 13 and 15 - 15 is done,
+10 and 13 still want the collider and crossing-detection work of step 6.
 
 ---
 
@@ -67,7 +68,7 @@ numbered entry in `docs/decisions.md` as it lands.
 6. **Pan is WASD + arrows + screen edge + middle-drag.** Deliberately _not_
    right-drag: that keeps right-click free as a tool action, so no press-versus-drag
    disambiguation is needed anywhere.
-7. **A junction corner handle slides along each arm** (D13). Its distance from the
+7. **A junction corner handle slides along each arm** (D12). Its distance from the
    junction sets _both_ the corner radius and how far that arm is pushed back.
    Stored per segment end (`pull_a` / `pull_b`, `None` meaning derive it) because
    it is user intent - the same reasoning D5 reserves for M4's lane connections.
@@ -117,8 +118,18 @@ Each step leaves the app runnable and the suite green.
 6. **Levels, colliders, crossings.** `level` and the corner pulls stored together
    (schema v2, once); `road/collider.py`; `road/spatial.py`; `road/crossing.py`;
    `road/validate.py`.
-7. **Junction quality.** Exact trims, then rounded corners, then the corner
-   handle, then pavements, then `render/junction_renderer.py` - in that order.
+7. ~~**Junction quality.** Exact trims, then rounded corners, then the corner
+   handle, then pavements, then `render/junction_renderer.py` - in that order.~~
+   **done, out of order** - it needed nothing from 5 or 6. `_pair_demand`
+   crosses each arm's own end piece (D11) with a tangent-ray-and-cap fallback
+   for kerbs too near parallel to cross locally; `_build_corners` fillets the
+   gap between every adjacent pair with `corner_fillet`, radius and room drawn
+   from `pull_a`/`pull_b` when a corner handle sets them; `road/pavement.py`
+   offsets that same fillet arc out by one sidewalk width; and
+   `render/junction_renderer.py` draws the rounded outline and the bands,
+   replacing the flat-polygon draw call in `network_renderer.py`. `pull_a`/
+   `pull_b` are persisted now, additively, without waiting for step 6's
+   version bump - see D12.
 8. **Docs.** This file's tick-offs, D9-D13, the roadmap, `CLAUDE.md`.
 
 ---

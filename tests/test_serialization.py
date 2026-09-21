@@ -77,6 +77,24 @@ def test_a_profile_survives_with_every_lane_intact():
         assert approx(segment.profile.datum, original.datum)
 
 
+def test_a_corner_handle_pull_survives_a_round_trip():
+    net = RoadNetwork()
+    seg = net.connect(Vec2(-40.0, 0.0), Vec2(40.0, 0.0), TRAM_AVENUE)
+    seg.pull_a = 9.5
+    net.rebuild_all()
+
+    loaded = loads(dumps(net))
+    twin = loaded.segments[seg.id]
+    assert approx(twin.pull_a, 9.5)
+    assert twin.pull_b is None
+
+
+def test_an_unset_pull_is_not_written_at_all():
+    net = build_demo_network()
+    text = json.dumps(network_to_dict(net))
+    assert "pull_a" not in text and "pull_b" not in text
+
+
 def test_an_empty_network_round_trips():
     assert dumps(loads(dumps(RoadNetwork()))) == dumps(RoadNetwork())
 

@@ -1,9 +1,13 @@
 """Versioned dict <-> model conversion.
 
 Only **authoritative** state is written: node positions, segment control points,
-corner radii and profiles. Paths, trims and junctions are derived (D5) and are
-rebuilt on load - persisting them is how a save file ends up disagreeing with
-itself.
+corner radii, corner-handle pulls and profiles. Paths, trims and junctions are
+derived (D5) and are rebuilt on load - persisting them is how a save file ends
+up disagreeing with itself.
+
+A `pull_a`/`pull_b` key is written only when it is set - `None` is the common
+case, and a file full of null pulls would bury the segments that actually have
+one.
 
 Ordering is deterministic everywhere (ids ascending, profiles by name) so that
 save -> load -> save is byte-identical. That round trip is the test that catches
@@ -48,6 +52,8 @@ def network_to_dict(network: RoadNetwork) -> dict[str, Any]:
                 "profile": seg.profile.name,
                 "radius": seg.corner_radius,
                 "points": [[p.x, p.y] for p in seg.control_points],
+                **({"pull_a": seg.pull_a} if seg.pull_a is not None else {}),
+                **({"pull_b": seg.pull_b} if seg.pull_b is not None else {}),
             }
             for sid, seg in sorted(network.segments.items())
         ],
@@ -91,7 +97,7 @@ def network_from_dict(payload: dict[str, Any]) -> RoadNetwork:
         name = seg["profile"]
         if name not in profiles:
             raise SchemaError(f"segment {seg['id']} uses undeclared profile {name!r}")
-        network.add_segment(
+        added = network.add_segment(
             seg["a"],
             seg["b"],
             [Vec2(float(x), float(y)) for x, y in seg["points"]],
@@ -99,6 +105,10 @@ def network_from_dict(payload: dict[str, Any]) -> RoadNetwork:
             corner_radius=float(seg["radius"]),
             segment_id=seg["id"],
         )
+        if "pull_a" in seg:
+            added.pull_a = float(seg["pull_a"])
+        if "pull_b" in seg:
+            added.pull_b = float(seg["pull_b"])
     network.rebuild_all()
     return network
 
