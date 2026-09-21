@@ -21,6 +21,7 @@ from .snapping import Snap, SnapKind
 
 SNAP_COLORS = {
     SnapKind.NODE: config.Color.SNAP_NODE,
+    SnapKind.ANCHOR: config.Color.SNAP_ANCHOR,
     SnapKind.SEGMENT: config.Color.SNAP_SEGMENT,
     SnapKind.ANGLE: config.Color.SNAP_ANGLE,
     SnapKind.GRID: config.Color.SNAP_GRID,
@@ -195,6 +196,11 @@ class EditorOverlay:
         center = camera.to_screen(snap.position)
         if snap.kind is SnapKind.NODE:
             pygame.draw.circle(surface, color, center, 9, 2)
+        elif snap.kind is SnapKind.ANCHOR:
+            direction = snap.anchor.direction
+            tip = camera.to_screen(snap.position + direction * 2.0)
+            pygame.draw.circle(surface, color, center, 5, 1)
+            pygame.draw.line(surface, color, center, tip, 2)
         elif snap.kind is SnapKind.SEGMENT:
             _cross(surface, color, center, 7)  # "this road will be split here"
         elif snap.kind is SnapKind.ANGLE:

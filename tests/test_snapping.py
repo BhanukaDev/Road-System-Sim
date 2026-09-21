@@ -158,3 +158,32 @@ def test_nothing_snaps_in_an_empty_network():
     assert empty.nearest_node(Vec2(0.0, 0.0)) is None
     assert empty.nearest_segment(Vec2(0.0, 0.0)) is None
     assert empty.snap(Vec2(3.0, 4.0)).kind is SnapKind.GRID
+
+
+# -- lane anchors ------------------------------------------------------------
+
+
+def test_a_point_beyond_a_dead_end_snaps_to_the_lane_it_continues(net):
+    """Past the end of the road, in line with one lane rather than the
+    centreline - this is the fix for item 12's centre-only snapping."""
+    snap = snapper(net).snap(Vec2(-70.0, 1.75))
+    assert snap.kind is SnapKind.ANCHOR
+    assert_vec(snap.position, Vec2(-70.0, 1.75))
+    assert snap.anchor.lane == 1
+
+
+def test_an_anchor_loses_to_the_node_it_sits_beside(net):
+    """Close enough to the node itself, the node still wins - an anchor only
+    matters once you are past its reach."""
+    snap = snapper(net).snap(Vec2(-60.0, 0.2))
+    assert snap.kind is SnapKind.NODE
+
+
+def test_an_anchor_does_not_reach_off_its_own_lane_line(net):
+    off_lane = Vec2(-70.0, 4.0)
+    assert snapper(net).snap(off_lane).kind is not SnapKind.ANCHOR
+
+
+def test_an_anchor_can_be_excluded_by_its_segment(net):
+    snap = snapper(net).snap(Vec2(-70.0, 1.75), ignore_segments=frozenset({1}))
+    assert snap.kind is not SnapKind.ANCHOR

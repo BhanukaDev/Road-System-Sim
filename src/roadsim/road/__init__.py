@@ -4,6 +4,7 @@ Knows about `geometry`, and about nothing above it. No pygame in this package -
 colors and drawing live in `render/`, tools and undo in `editor/`.
 """
 
+from .anchor import Anchor, end_anchors, node_anchors
 from .cap import Cap, CapKind, build_cap
 from .junction import Junction, SegmentEnd, build_junction
 from .lane import Direction, LaneSpec, LaneType
@@ -16,6 +17,7 @@ from .segment import RoadSegment
 __all__ = [
     "DEFAULT_PROFILE",
     "PROFILES",
+    "Anchor",
     "Cap",
     "CapKind",
     "Direction",
@@ -29,4 +31,6 @@ __all__ = [
     "SegmentEnd",
     "build_cap",
     "build_junction",
+    "end_anchors",
+    "node_anchors",
 ]

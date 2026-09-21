@@ -102,6 +102,16 @@ Each step leaves the app runnable and the suite green.
    edges, exactly as wide as the road and no wider, so no trim or width change is
    needed - a one-way road gets a **terminal**, just a stop line. Squared-off dead
    ends are gone from `render/network_renderer.py`.
+
+   The slice after that adds `road/anchor.py` (item 12's other half): one
+   `Anchor` per vehicle lane at each segment end, sitting exactly on that lane's
+   own centreline rather than the road's. `Snapper` gains a matching `ANCHOR`
+   snap kind - checked after `NODE` but before the plain `SEGMENT` snap, and
+   still `is_free` like `GRID`/`ANGLE`, since it only offers a position and a
+   heading (D5) - the endpoint it seeds is an ordinary free node, never a lane
+   connection. A road drawn off the end of a two-lane road now lines up with
+   the lane it continues instead of snapping back to the centreline.
+
 5. **Tool modes, loops, bulldoze, replace.** `editor/shapers/`;
    `editor/road_build.py`; `editor/impact.py`; the bulldoze and replace tools.
 6. **Levels, colliders, crossings.** `level` and the corner pulls stored together

@@ -38,6 +38,9 @@ SNAP_NODE_PX = 16.0
 """Snap radii are in *pixels*, converted through `camera.zoom`. A snap that gets
 harder to hit as you zoom out is a snap that is broken."""
 SNAP_SEGMENT_PX = 12.0
+SNAP_ANCHOR_PX = 10.0
+"""Reach of a lane anchor - deliberately tighter than a plain segment snap, so
+it only wins when the cursor is genuinely lined up with that lane."""
 SNAP_GRID_PX = 9.0
 ANGLE_SNAP_DEG = 15.0
 """Held-Shift direction constraint while drawing."""
@@ -140,6 +143,7 @@ class Color:
     PREVIEW_DIM = (138, 120, 70)
     SNAP_NODE = (120, 226, 160)
     SNAP_SEGMENT = (120, 190, 226)
+    SNAP_ANCHOR = (226, 190, 120)
     SNAP_GRID = (140, 146, 158)
     SNAP_ANGLE = (226, 150, 220)
     GUIDE = (168, 120, 226)

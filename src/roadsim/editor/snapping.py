@@ -19,12 +19,19 @@ from typing import Any
 from .. import config
 from ..geometry import Vec2
 from ..render.camera import Camera
+from ..road.anchor import Anchor, node_anchors
 from ..road.network import RoadNetwork
 
 
 class SnapKind(Enum):
     NODE = "node"
     """Connect to an existing node. Payload: node id."""
+    ANCHOR = "anchor"
+    """Aligned with one lane of a nearby road. Payload: the `Anchor`.
+
+    An alignment aid, not a connection (D5) - the point it offers is a free
+    one, same as `GRID` or `ANGLE`; only its *position* comes from the network.
+    """
     SEGMENT = "segment"
     """Split there and connect. Payload: (segment id, arc length)."""
     ANGLE = "angle"
@@ -48,9 +55,13 @@ class Snap:
         return self.payload if self.kind is SnapKind.SEGMENT else None
 
     @property
+    def anchor(self) -> Anchor | None:
+        return self.payload if self.kind is SnapKind.ANCHOR else None
+
+    @property
     def is_free(self) -> bool:
         """True when nothing in the network claimed this point."""
-        return self.kind in (SnapKind.GRID, SnapKind.ANGLE)
+        return self.kind in (SnapKind.ANCHOR, SnapKind.GRID, SnapKind.ANGLE)
 
 
 class Snapper:
@@ -69,6 +80,9 @@ class Snapper:
         node = self.nearest_node(point, ignore_nodes)
         if node is not None:
             return node
+        anchor = self.nearest_anchor(point, ignore_nodes, ignore_segments)
+        if anchor is not None:
+            return anchor
         segment = self.nearest_segment(point, ignore_segments)
         if segment is not None:
             return segment
@@ -92,6 +106,28 @@ class Snapper:
         if best is None:
             return None
         return Snap(SnapKind.NODE, best.position, best.id)
+
+    def nearest_anchor(
+        self,
+        point: Vec2,
+        ignore_nodes: frozenset[int] = frozenset(),
+        ignore_segments: frozenset[int] = frozenset(),
+    ) -> Snap | None:
+        reach = self.world_radius(config.SNAP_ANCHOR_PX)
+        best: Snap | None = None
+        best_d = reach
+        for node in self.network.nodes.values():
+            if node.id in ignore_nodes:
+                continue
+            for anchor in node_anchors(self.network, node.id):
+                if anchor.segment_id in ignore_segments:
+                    continue
+                traveled = max(0.0, (point - anchor.origin).dot(anchor.direction))
+                position = anchor.point_at(traveled)
+                d = position.distance_to(point)
+                if d <= best_d:
+                    best, best_d = Snap(SnapKind.ANCHOR, position, anchor), d
+        return best
 
     def nearest_segment(
         self, point: Vec2, ignore: frozenset[int] = frozenset()
