@@ -119,6 +119,38 @@ def test_mirroring_twice_restores_the_name_as_well_as_the_shape():
     assert approx(there_and_back.datum, p.datum)
 
 
+def test_with_datum_shifts_every_edge_by_the_difference():
+    p = profile(WALK, CAR_B, CAR_F, WALK, datum=1.0)
+    shifted = p.with_datum(4.0)
+    for before, after in zip(p.edges, shifted.edges):
+        assert approx(after, before + 3.0)
+    assert shifted.lanes == p.lanes
+
+
+def test_with_datum_is_named_apart_from_its_original():
+    """The same reasoning as a mirror's name (D-2): a save file keys profiles
+    by name, so two different datums sharing one name means one silently
+    loads as the other."""
+    p = profile(WALK, CAR_B, CAR_F, WALK)
+    assert p.with_datum(2.5).name != p.name
+
+
+def test_with_datum_does_not_accumulate_suffixes():
+    """Realigning an already-aligned road replaces its shift, it does not
+    walk the name off into `..._d2.5_d4.0_d-1.0`."""
+    p = profile(WALK, CAR_B, CAR_F, WALK)
+    twice = p.with_datum(2.5).with_datum(4.0)
+    assert twice.name == p.with_datum(4.0).name
+    assert approx(twice.datum, 4.0)
+
+
+def test_with_datum_zero_restores_the_original_name():
+    p = profile(WALK, CAR_B, CAR_F, WALK)
+    back = p.with_datum(2.5).with_datum(0.0)
+    assert back.name == p.name
+    assert approx(back.datum, 0.0)
+
+
 def test_a_profile_needs_at_least_one_lane():
     with pytest.raises(ValueError):
         RoadProfile("empty", ())

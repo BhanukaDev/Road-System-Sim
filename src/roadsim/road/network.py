@@ -104,6 +104,40 @@ class RoadNetwork:
         self.caps.pop(node_id, None)
         self._dirty.discard(node_id)
 
+    def merge_nodes(self, dragged_id: int, target_id: int) -> None:
+        """Fold `dragged_id` into `target_id`: every segment touching the
+        former now touches the latter, pinned to its position, and the former
+        is gone.
+
+        The only way two separately drawn roads become one real junction - no
+        other path here connects two already-existing nodes. A no-op if the
+        two are already the same node; a segment that already touches both
+        (a short loop, or a road already joining them some other way)
+        collapses to a zero-length loop at `target_id` rather than being
+        refused, the same trade `split_segment` makes rather than special-
+        casing a rare shape.
+        """
+        if dragged_id == target_id:
+            return
+        target = self.nodes[target_id]
+        for segment_id in sorted(self.nodes[dragged_id].segments):
+            segment = self.segments[segment_id]
+            # Both ends, independently - `is_at_a` alone would miss the second
+            # end of a loop touching `dragged_id` at both, leaving it pointing
+            # at a node this method is about to delete.
+            if segment.node_a == dragged_id:
+                segment.node_a = target_id
+                segment.set_endpoint(True, target.position)
+            if segment.node_b == dragged_id:
+                segment.node_b = target_id
+                segment.set_endpoint(False, target.position)
+            target.segments.add(segment_id)
+            self._touch_ends(segment)
+        del self.nodes[dragged_id]
+        self.junctions.pop(dragged_id, None)
+        self.caps.pop(dragged_id, None)
+        self._dirty.discard(dragged_id)
+
     def move_node(self, node_id: int, position: Vec2) -> None:
         node = self.nodes[node_id]
         node.position = position
@@ -117,6 +151,27 @@ class RoadNetwork:
     def set_profile(self, segment_id: int, profile: RoadProfile) -> None:
         segment = self.segments[segment_id]
         segment.profile = profile
+        self._touch_ends(segment)
+
+    def set_control_points(self, segment_id: int, points: list[Vec2]) -> None:
+        """Replace a segment's own shape, keeping it pinned to its two nodes.
+
+        The endpoints are re-pinned the same way `add_segment` pins a fresh
+        road's: the nodes, not whatever a shape drag computed, decide where a
+        road ends, so a reshape can never detach a road from its junction.
+        """
+        segment = self.segments[segment_id]
+        points = list(points)
+        points[0] = self.nodes[segment.node_a].position
+        points[-1] = self.nodes[segment.node_b].position
+        segment.control_points = points
+        segment.refit()
+        self._touch_ends(segment)
+
+    def set_corner_radius(self, segment_id: int, radius: float) -> None:
+        segment = self.segments[segment_id]
+        segment.corner_radius = radius
+        segment.refit()
         self._touch_ends(segment)
 
     def split_segment(self, segment_id: int, s: float) -> tuple[int, int, int]:

@@ -15,10 +15,13 @@ from roadsim.editor.commands import (
     Composite,
     CreateNode,
     History,
+    MergeNodes,
     MoveNode,
     NodeSlot,
     RemoveNode,
     RemoveSegment,
+    SetControlPoints,
+    SetCornerRadius,
     SetProfile,
     SplitSegment,
 )
@@ -93,6 +96,64 @@ def test_set_profile_is_reversible(net):
 
 def test_split_segment_is_reversible(net):
     assert_reversible(net, SplitSegment(5, net.segments[5].path.length / 2.0))
+
+
+def test_set_control_points_is_reversible(net):
+    segment = net.segments[1]
+    points = list(segment.control_points)
+    points.insert(1, Vec2(-40.0, 15.0))
+    assert_reversible(net, SetControlPoints(1, points))
+
+
+def test_set_corner_radius_is_reversible(net):
+    assert_reversible(net, SetCornerRadius(5, 20.0))
+
+
+def test_set_control_points_cannot_detach_a_road_from_its_node(net):
+    """The endpoints are re-pinned regardless of what the command was handed -
+    a shape drag can reshape a road, never disconnect it."""
+    segment = net.segments[1]
+    wrong = [Vec2(999.0, 999.0), *segment.control_points[1:]]
+
+    SetControlPoints(1, wrong).do(net)
+    net.rebuild_dirty()
+
+    assert net.segments[1].control_points[0] == net.nodes[segment.node_a].position
+    assert net.segments[1].control_points[0] != Vec2(999.0, 999.0)
+
+
+def test_merge_nodes_is_reversible(net):
+    """Two dead ends of the fixture's own arms, far apart - merging them is a
+    real topology change with no realistic geometry needed to prove it."""
+    assert_reversible(net, MergeNodes(1, 4))
+
+
+def test_merge_nodes_undo_restores_the_dragged_node_and_its_segments(net):
+    dragged_id, target_id = 1, 4
+    before_position = net.nodes[dragged_id].position
+    before_control_points = list(net.segments[1].control_points)
+
+    command = MergeNodes(dragged_id, target_id)
+    command.do(net)
+    net.rebuild_dirty()
+    assert dragged_id not in net.nodes
+
+    command.undo(net)
+    net.rebuild_dirty()
+
+    assert net.nodes[dragged_id].position == before_position
+    assert net.segments[1].node_a == dragged_id
+    assert net.segments[1].control_points == before_control_points
+    assert dragged_id not in net.nodes[target_id].segments
+    assert 1 in net.nodes[dragged_id].segments
+
+
+def test_set_control_points_marks_both_ends_dirty(net):
+    segment = net.segments[1]
+    net.rebuild_dirty()  # start from a clean slate
+
+    SetControlPoints(1, list(segment.control_points)).do(net)
+    assert net.dirty_nodes == frozenset({segment.node_a, segment.node_b})
 
 
 def test_add_segment_is_reversible(net):

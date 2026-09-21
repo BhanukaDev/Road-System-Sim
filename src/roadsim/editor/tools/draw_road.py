@@ -28,6 +28,7 @@ from ..commands import (
 )
 from ..context import AngleReadout, EditorContext, ToolPreview
 from ..guides import find_guides
+from ..modifiers import Modifiers
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
 
@@ -206,11 +207,11 @@ class DrawRoadTool(Tool):
     # -- helpers -----------------------------------------------------------
 
     def _snap(self, ctx: EditorContext, pos: tuple[int, int]) -> Snap:
-        held = pygame.key.get_mods() & pygame.KMOD_SHIFT
+        mods = Modifiers.current()
         return ctx.snapper.snap(
             ctx.world(*pos),
             from_point=self.points[-1] if self.points else None,
-            constrain_angle=bool(held),
+            constrain_angle=mods.shift,
         )
 
 

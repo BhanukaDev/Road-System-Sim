@@ -32,7 +32,7 @@ answers:
 | 9   | No alignment guides near other roads                                                     | -                                   |
 | 10  | No collision detection: extreme shapes and self-overlap both pass                        | -                                   |
 | 11  | No live measurements - length, angle, what you are connecting to                         | -                                   |
-| 12  | Snapping is centre-only, so different lane counts always centre-align                    | `editor/snapping.py`                |
+| 12  | ~~Snapping is centre-only, so different lane counts always centre-align~~ **done**       | `editor/snapping.py`                |
 | 13  | Two roads crossing without a shared node **do not form a junction**                      | nothing detects crossings           |
 | 14  | No height, so no bridges or overpasses                                                   | -                                   |
 | 15  | ~~Junctions have no pavement and square corners~~ **done**                               | `road/junction.py`                  |
@@ -368,7 +368,7 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 
 ## Landed beyond the original list
 
-Three things were brought forward or found while building, and are recorded in
+Six things were brought forward or found while building, and are recorded in
 `docs/decisions.md` rather than here:
 
 - **Shallow merges (D13).** Item 10's "extreme shapes pass" turned out to have a
@@ -382,6 +382,34 @@ Three things were brought forward or found while building, and are recorded in
 - **Lane transitions (D15).** `road/transition.py` paints the patch where a
   road changes lane count. Its lane pairing is geometric and deliberately
   *not* the connectivity model D5 reserves for M4/M5.
+- **Lane-aware node dragging (D18), closing item 12.** `road/lane_handle.py`
+  adds one handle per lane and per lane edge at each end of a node, sitting on
+  the *untrimmed* end so a live junction rebuild never moves it under the
+  cursor. `editor/node_grab.py` grabs one by a frozen lever -
+  `lever = handle.position - node.position`, unchanged since grab - and
+  `MoveNodeTool` computes every drag, lane-handle or plain centre alike, as
+  `node.position = drop.position - lever`. Because both ends of the lever are
+  resolved to absolute world positions before anything is subtracted, joining
+  a 2-lane road to a 4-lane one by a chosen lane or kerb needs no flip term,
+  in either direction, at either end.
+- **Shape handles on a selected road (D19's other half).** `road/shape_handle.py`
+  derives a handle at every fillet's belly and both its tangent points, and at
+  the midpoint of every straight, from `segment.path.pieces` alone -
+  `control_points` stays authoritative, so selecting a road changes nothing on
+  disk. `editor/tools/shape_road.py` drags them: a `CONTROL` or `ARC_MID`
+  handle moves the interior control point that produced it (every arc is the
+  fillet of exactly one, per `fit_polyline`); a `STRAIGHT_MID` handle
+  materialises a new one first, provably without moving the road at all,
+  since a collinear insertion gets no fillet; an `ARC_END` handle drags
+  `segment.corner_radius` instead of a point. Two new commands,
+  `SetControlPoints` and `SetCornerRadius`, follow `SetProfile`'s shape.
+- **Alt snaps the curve while reshaping (D19).** `editor/curve_snap.py` gives a
+  position drag two snaps - tangent continuity where two roads meet at a node,
+  then heading quantised to `ANGLE_SNAP_DEG` - tried in that fixed order
+  because a kink across the whole network outranks one road's own tidiness,
+  and a radius drag one - `round_radius` onto `config.RADIUS_LADDER`. The
+  three never actually compete: the radius snap acts on a scalar an `ARC_END`
+  handle alone reaches, never a point the other two share.
 
 Stop lines and turn decals also stopped spanning the whole carriageway: both now
 cover the approach half of a mouth only. Handedness arrived as
@@ -395,8 +423,9 @@ cover the approach half of a mouth only. Handedness arrived as
   drawn but not smoothed or banked.
 - **Bridge presentation** - pillars, shadows, elevation shading. One cue only: paint
   order by level, and the level in the readout.
-- **Handle-editing a placed road's shape** by dragging its control points. Freehand
-  already covers freeform _drawing_; editing a placed shape is its own milestone.
+- ~~**Handle-editing a placed road's shape** by dragging its control points.~~
+  **done, out of order** - `road/shape_handle.py`, `editor/tools/shape_road.py`;
+  see "Landed beyond the original list" below.
 - **Moving `Snapper` onto `SpatialIndex`.** Build the index for crossings; leave the
   snapper alone. A faster snapper that snaps differently is a regression.
 

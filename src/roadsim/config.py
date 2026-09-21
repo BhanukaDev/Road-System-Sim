@@ -38,6 +38,12 @@ FLATTEN_TOLERANCE_PX = 0.35
 DEFAULT_CORNER_RADIUS = 12.0
 """Metres. The fillet radius the draw tool asks for at each corner."""
 
+RADIUS_LADDER = (5.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0, 75.0, 100.0)
+"""Metres. The rungs a curve radius snaps to while the curve-snap modifier is
+held. Not a uniform step: a road bends tightly at the low end and loosely at the
+high end, so even spacing would give a useless choice in one half and no choice
+at all in the other."""
+
 JUNCTION_MAX_TRIM_FACTOR = 3.0
 """Floor on an arm's trim budget, in multiples of the widest arm's half-width.
 
@@ -104,10 +110,19 @@ SNAP_NODE_PX = 16.0
 """Snap radii are in *pixels*, converted through `camera.zoom`. A snap that gets
 harder to hit as you zoom out is a snap that is broken."""
 SNAP_SEGMENT_PX = 12.0
+SNAP_LANE_PX = 8.0
+"""Reach of a lane handle at a node - the tightest snap there is, because a
+road's lane and edge handles sit a lane's width apart and a loose radius would
+make picking a particular one a matter of luck."""
 SNAP_ANCHOR_PX = 10.0
 """Reach of a lane anchor - deliberately tighter than a plain segment snap, so
 it only wins when the cursor is genuinely lined up with that lane."""
 SNAP_GRID_PX = 9.0
+SHAPE_HANDLE_PX = 10.0
+"""Reach of a shape handle along a selected road's own outline - `editor/
+tools/shape_road.py`. Its own scale, not one of `Snapper`'s: a shape handle is
+scoped to a single already-selected segment rather than searched for across
+the whole network, so it is picked directly rather than through `Snapper`."""
 ANGLE_SNAP_DEG = 15.0
 """Held-Shift direction constraint while drawing."""
 ALIGNMENT_GUIDE_PX = 6.0
@@ -275,9 +290,20 @@ class Color:
     SNAP_NODE = (120, 226, 160)
     SNAP_SEGMENT = (120, 190, 226)
     SNAP_ANCHOR = (226, 190, 120)
+    SNAP_LANE = (140, 226, 214)
     SNAP_GRID = (140, 146, 158)
     SNAP_ANGLE = (226, 150, 220)
     GUIDE = (168, 120, 226)
+
+    HANDLE_LANE = (140, 226, 214)
+    HANDLE_EDGE = (108, 176, 170)
+    HANDLE_CONTROL = (226, 168, 72)
+    """An authoritative control point - the same colour as a node, because it is
+    the same kind of thing: stored state the user put there."""
+    HANDLE_DERIVED = (150, 156, 168)
+    """A handle the editor worked out rather than one the user placed. Dimmer on
+    purpose, so what is real is legible against what is merely offered."""
+    HANDLE_ACTIVE = (250, 214, 130)
 
     HUD_TEXT = (214, 218, 226)
     HUD_DIM = (128, 134, 144)

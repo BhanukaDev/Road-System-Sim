@@ -20,6 +20,7 @@ from .. import config
 from ..geometry import Vec2
 from ..render.camera import Camera
 from ..road.anchor import Anchor, node_anchors
+from ..road.lane_handle import LaneHandle, node_lane_handles
 from ..road.network import RoadNetwork
 
 
@@ -32,6 +33,12 @@ class SnapKind(Enum):
     An alignment aid, not a connection (D5) - the point it offers is a free
     one, same as `GRID` or `ANGLE`; only its *position* comes from the network.
     """
+    LANE = "lane"
+    """A lane or lane-edge handle at a node. Payload: the `LaneHandle`.
+
+    Asked for explicitly by a node drag (`editor/node_grab.py`), never through
+    `snap()` - a lane drop is a targeted question about what a specific drag is
+    holding, not the generic "what is under the cursor" every tool shares."""
     SEGMENT = "segment"
     """Split there and connect. Payload: (segment id, arc length)."""
     ANGLE = "angle"
@@ -59,9 +66,13 @@ class Snap:
         return self.payload if self.kind is SnapKind.ANCHOR else None
 
     @property
+    def lane_handle(self) -> LaneHandle | None:
+        return self.payload if self.kind is SnapKind.LANE else None
+
+    @property
     def is_free(self) -> bool:
         """True when nothing in the network claimed this point."""
-        return self.kind in (SnapKind.ANCHOR, SnapKind.GRID, SnapKind.ANGLE)
+        return self.kind in (SnapKind.ANCHOR, SnapKind.LANE, SnapKind.GRID, SnapKind.ANGLE)
 
 
 class Snapper:
@@ -127,6 +138,31 @@ class Snapper:
                 d = position.distance_to(point)
                 if d <= best_d:
                     best, best_d = Snap(SnapKind.ANCHOR, position, anchor), d
+        return best
+
+    def nearest_lane_handle(
+        self,
+        point: Vec2,
+        ignore_nodes: frozenset[int] = frozenset(),
+        ignore_segments: frozenset[int] = frozenset(),
+    ) -> Snap | None:
+        """The nearest lane or edge handle - what a node drag is dropped onto.
+
+        Not part of `snap()`'s chain (see `SnapKind.LANE`); a tool calls this
+        directly, the same way `nearest_node` and `nearest_anchor` already are.
+        """
+        reach = self.world_radius(config.SNAP_LANE_PX)
+        best: Snap | None = None
+        best_d = reach
+        for node in self.network.nodes.values():
+            if node.id in ignore_nodes:
+                continue
+            for handle in node_lane_handles(self.network, node.id):
+                if handle.segment_id in ignore_segments:
+                    continue
+                d = handle.position.distance_to(point)
+                if d <= best_d:
+                    best, best_d = Snap(SnapKind.LANE, handle.position, handle), d
         return best
 
     def nearest_segment(

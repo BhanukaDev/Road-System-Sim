@@ -21,6 +21,7 @@ from ..road.presets import DEFAULT_PROFILE, PROFILES
 from ..road.profile import RoadProfile
 from .commands import Command, History
 from .guides import Guide
+from .handle import PreviewHandle
 from .snapping import Snap, Snapper
 
 
@@ -79,6 +80,11 @@ class ToolPreview:
     measurement: float | None = None
     angles: list[AngleReadout] = field(default_factory=list)
     guides: list[Guide] = field(default_factory=list)
+    handles: list[PreviewHandle] = field(default_factory=list)
+    """Points the user can take hold of right now - lane handles at a node, or
+    shape handles along a selected road. Carried as data with a *kind* so the
+    overlay can draw each family differently without knowing where it came
+    from, and so a test can assert what is on offer with no window open."""
     profile: RoadProfile | None = None
     """Cross-section to use when drawing the preview roads."""
 
@@ -92,6 +98,7 @@ class ToolPreview:
             or self.measurement is not None
             or self.angles
             or self.guides
+            or self.handles
         )
 
 

@@ -17,6 +17,7 @@ from ..render.curves import to_screen_points
 from ..render.lane_style import LAYERS, style_for
 from ..road.network import RoadNetwork
 from .context import Selection, ToolPreview
+from .handle import HandleKind, PreviewHandle
 from .snapping import Snap, SnapKind
 
 SNAP_COLORS = {
@@ -25,7 +26,19 @@ SNAP_COLORS = {
     SnapKind.SEGMENT: config.Color.SNAP_SEGMENT,
     SnapKind.ANGLE: config.Color.SNAP_ANGLE,
     SnapKind.GRID: config.Color.SNAP_GRID,
+    SnapKind.LANE: config.Color.SNAP_LANE,
 }
+
+HANDLE_STYLES: dict[HandleKind, tuple[tuple[int, int, int], int, int]] = {
+    HandleKind.LANE: (config.Color.HANDLE_LANE, 4, 1),
+    HandleKind.EDGE: (config.Color.HANDLE_EDGE, 3, 1),
+    HandleKind.CONTROL: (config.Color.HANDLE_CONTROL, 5, 0),
+    HandleKind.ARC_MID: (config.Color.HANDLE_DERIVED, 4, 1),
+    HandleKind.ARC_END: (config.Color.HANDLE_DERIVED, 3, 1),
+    HandleKind.STRAIGHT_MID: (config.Color.HANDLE_DERIVED, 3, 1),
+}
+"""Colour, screen radius and outline width per handle kind. A registry rather
+than a branch: a new kind is one line here and it appears on screen."""
 
 
 class EditorOverlay:
@@ -165,8 +178,24 @@ class EditorOverlay:
             )
             surface.blit(label, (x + 8, y - 20))
 
+        self._draw_handles(surface, camera, preview.handles)
+
         if preview.snap is not None:
             self._draw_snap(surface, camera, preview.snap)
+
+    def _draw_handles(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        handles: list[PreviewHandle],
+    ) -> None:
+        for handle in handles:
+            color, radius, width = HANDLE_STYLES[handle.kind]
+            if handle.active:
+                color, width = config.Color.HANDLE_ACTIVE, 0
+            pygame.draw.circle(
+                surface, color, camera.to_screen(handle.position), radius, width
+            )
 
     def _draw_preview_lanes(
         self, surface, camera, path, profile, layer, invalid=False
@@ -201,6 +230,8 @@ class EditorOverlay:
             tip = camera.to_screen(snap.position + direction * 2.0)
             pygame.draw.circle(surface, color, center, 5, 1)
             pygame.draw.line(surface, color, center, tip, 2)
+        elif snap.kind is SnapKind.LANE:
+            pygame.draw.circle(surface, color, center, 6, 2)
         elif snap.kind is SnapKind.SEGMENT:
             _cross(surface, color, center, 7)  # "this road will be split here"
         elif snap.kind is SnapKind.ANGLE:

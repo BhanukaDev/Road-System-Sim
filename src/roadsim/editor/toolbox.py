@@ -14,12 +14,14 @@ from .tools.draw_road import DrawRoadTool
 from .tools.move_node import MoveNodeTool
 from .tools.profile import ProfileTool
 from .tools.select import SelectTool
+from .tools.shape_road import ShapeRoadTool
 
 TOOLS: list[type[Tool]] = [
     SelectTool,
     DrawRoadTool,
     MoveNodeTool,
     ProfileTool,
+    ShapeRoadTool,
 ]
 """Order is the hotkey order: 1, 2, 3, ... The first entry is the default."""
 

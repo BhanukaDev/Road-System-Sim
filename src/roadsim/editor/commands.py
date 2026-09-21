@@ -158,6 +158,46 @@ class RemoveNode(Command):
             state.restore(network)
 
 
+@dataclass
+class MergeNodes(Command):
+    """Fold `dragged_id` into `target_id` - the only way two separately drawn
+    roads become one real junction (D20). Every segment `dragged_id` touched
+    still exists afterwards, only rewired, so undo restores their node
+    references and control points directly rather than through
+    `_SegmentState.restore` - that method re-`add_segment`s, which would
+    collide with a segment id `merge_nodes` never actually freed."""
+
+    dragged_id: int
+    target_id: int
+    label: str = "connect road"
+    _position: Vec2 | None = field(default=None, init=False, repr=False)
+    _segments: tuple[_SegmentState, ...] | None = field(
+        default=None, init=False, repr=False
+    )
+
+    def do(self, network: RoadNetwork) -> None:
+        if self._position is None:
+            node = network.nodes[self.dragged_id]
+            self._position = node.position
+            self._segments = tuple(
+                _SegmentState.capture(network.segments[sid])
+                for sid in sorted(node.segments)
+            )
+        network.merge_nodes(self.dragged_id, self.target_id)
+
+    def undo(self, network: RoadNetwork) -> None:
+        network.add_node(self._position, node_id=self.dragged_id)
+        dragged, target = network.nodes[self.dragged_id], network.nodes[self.target_id]
+        for state in self._segments:
+            segment = network.segments[state.id]
+            segment.node_a, segment.node_b = state.node_a, state.node_b
+            segment.control_points = list(state.control_points)
+            segment.refit()
+            target.segments.discard(state.id)
+            dragged.segments.add(state.id)
+            network._touch_ends(segment)
+
+
 # -- segments --------------------------------------------------------------
 
 
@@ -232,6 +272,46 @@ class SetProfile(Command):
 
     def undo(self, network: RoadNetwork) -> None:
         network.set_profile(self.segment_id, self._was)
+
+
+@dataclass
+class SetControlPoints(Command):
+    """Reshape a placed road - what `editor/tools/shape_road.py` drags with.
+
+    `network.set_control_points` re-pins both endpoints to the nodes, so this
+    can never detach a road from its junction; nothing here needs to repeat
+    that check."""
+
+    segment_id: int
+    control_points: list[Vec2]
+    label: str = "reshape road"
+    _was: tuple[Vec2, ...] | None = field(default=None, init=False, repr=False)
+
+    def do(self, network: RoadNetwork) -> None:
+        if self._was is None:
+            self._was = tuple(network.segments[self.segment_id].control_points)
+        network.set_control_points(self.segment_id, list(self.control_points))
+
+    def undo(self, network: RoadNetwork) -> None:
+        network.set_control_points(self.segment_id, list(self._was))
+
+
+@dataclass
+class SetCornerRadius(Command):
+    """Dragging a fillet's `ARC_END` handle - one radius for the whole road."""
+
+    segment_id: int
+    radius: float
+    label: str = "set corner radius"
+    _was: float | None = field(default=None, init=False, repr=False)
+
+    def do(self, network: RoadNetwork) -> None:
+        if self._was is None:
+            self._was = network.segments[self.segment_id].corner_radius
+        network.set_corner_radius(self.segment_id, self.radius)
+
+    def undo(self, network: RoadNetwork) -> None:
+        network.set_corner_radius(self.segment_id, self._was)
 
 
 @dataclass

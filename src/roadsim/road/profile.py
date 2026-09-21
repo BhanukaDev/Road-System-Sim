@@ -123,9 +123,33 @@ class RoadProfile:
         )
         return RoadProfile(mirror_name(self.name), lanes, -self.datum)
 
+    def with_datum(self, datum: float) -> RoadProfile:
+        """The same lanes, shifted sideways so the profile's own centre sits
+        `datum` to the left of wherever it is measured from.
+
+        Connecting two separately-drawn roads by a chosen lane (D20) is this:
+        once they share one real junction node, position carries no more
+        alignment information - a shared point is a shared point - so which
+        lanes line up is entirely this number.
+
+        **The name has to change with it, same reasoning as `mirrored()`.** A
+        save file keys its profiles by name, and two different datums under
+        one name would collide, silently keeping whichever loaded last. The
+        datum is baked into the name; asking twice replaces it rather than
+        compounding it, so repeated re-alignment does not walk the name off
+        into nonsense.
+        """
+        base = datum_base_name(self.name)
+        if abs(datum) < 1e-9:
+            return RoadProfile(base, self.lanes, 0.0)
+        return RoadProfile(f"{base}{DATUM_SEP}{datum:.3f}", self.lanes, datum)
+
 
 MIRROR_SUFFIX = "_mirrored"
 """Marks a profile as another one seen from the far end. See `mirrored`."""
+
+DATUM_SEP = "@d"
+"""Marks a profile as shifted by a specific datum. See `with_datum`."""
 
 
 def mirror_name(name: str) -> str:
@@ -133,3 +157,12 @@ def mirror_name(name: str) -> str:
     if name.endswith(MIRROR_SUFFIX):
         return name[: -len(MIRROR_SUFFIX)]
     return name + MIRROR_SUFFIX
+
+
+def datum_base_name(name: str) -> str:
+    """`name` with any existing datum suffix stripped, so `with_datum` never
+    accumulates one - realigning an already-aligned road replaces its shift
+    rather than adding to it."""
+    if DATUM_SEP in name:
+        return name.split(DATUM_SEP, 1)[0]
+    return name

@@ -525,3 +525,149 @@ thing a pedestrian would notice: `inner` is exactly one sidewalk width from the
 kerb at every point along it, measured by projecting back onto the kerb rather
 than by arc-length fraction (offsetting an arc changes its length, so equal
 fractions are not equal points).
+
+## D18. A node drag is grabbed by a lever, frozen at grab time
+
+**The symptom item 12 names:** snapping was centre-only, so a 2-lane road
+joining a 4-lane one always landed centre-on-centre - there was nothing else on
+a node to take hold of.
+
+**The model.** `road/lane_handle.py` adds one handle per lane and one per lane
+boundary (`LaneHandleKind.LANE` / `EDGE`) at each end of a segment, sitting on
+the node's own *untrimmed* end (`path.sample(0.0)` / `path.sample(length)`),
+never the trimmed carriageway end an `Anchor` uses. The trim is derived from the
+junction and is rebuilt every frame a drag runs, including because of the drag
+itself - a handle built from it would shift under the cursor while held.
+
+**The lever, not a flip term.** Grabbing a handle records
+`lever = handle.position - node.position`, frozen at the moment of the grab.
+Dragging computes `node.position = drop.position - lever` every step, so the
+node - not the handle - is what actually moves, and the handle rides along at
+a fixed offset from it, exactly like the plain centre handle already did
+(`lever = Vec2(0, 0)` is that case, unchanged). Because both the grabbed point
+and the drop point are resolved to absolute world positions before anything is
+subtracted, there is no per-frame sign to get right depending on which way
+either road was drawn - unlike `road/transition.py`'s `flip`, which exists
+because *that* module maps a signed profile offset out of one segment's frame
+and into another's. A lever never does that, so it needs no flip, in any of the
+four combinations of which end of which road is grabbed and targeted (tests in
+`tests/test_lane_handle.py`).
+
+**Where the state lives.** A grab is `editor/node_grab.NodeGrab` - `node_id`,
+`origin`, `lever`, and the `LaneHandle` it came from for the HUD only. It lives
+on the tool for the length of the drag and touches `RoadNode`, `Selection` and
+every `Command` not at all: what lands in history is a plain
+`MoveNode(node_id, final_position)`, the same command the centre handle has
+always produced. Lane-aware dragging therefore costs nothing in serialization,
+undo/redo, or any other model this milestone's D5 already protects.
+
+**The frozen-lever residual, accepted rather than hidden.** The lever is
+correct only for the tangent it was measured against. If the node's *other*
+end is fixed elsewhere and the drag rotates the segment, the handle's true
+post-move offset differs slightly from the one the lever assumed, by
+`|offset| * (1 - cos Δθ)` for a rotation of `Δθ`. Recomputing the lever every
+step removes the residual but creates a worse problem - the target keeps moving
+as the segment keeps turning to chase it, which can fail to converge at all.
+Freezing it is the same trade a physical lever makes: sub-millimetre on an
+ordinary drag, visible only on a violent one, and always resolved the instant
+the mouse is released and the node's real tangent is whatever the user left it
+as. Nothing currently surfaces the residual live; a HUD readout of how far the
+held lane is presently sitting from the cursor's own drop point is the natural
+follow-up if it turns out to matter in practice.
+
+## D19. Alt's three curve snaps do not arbitrate - they cannot conflict
+
+`editor/curve_snap.py` gives a shape-handle drag (`editor/tools/shape_road.py`,
+M3's un-deferred "handle-editing a placed road's shape") three things to snap
+to while Alt is held: the point clinging to another road's tangent at a shared
+node, the point's own turn rounding to `config.ANGLE_SNAP_DEG`, and a fillet's
+radius rounding to a rung of `config.RADIUS_LADDER`.
+
+**The radius snap was never going to compete with the other two - it acts on a
+different variable.** `ARC_END` drags `segment.corner_radius`, a scalar;
+`CONTROL`, `ARC_MID` and `STRAIGHT_MID` drag a point. A handle is one or the
+other, never both, so `round_radius` and the two position snaps are simply
+never asked the same question.
+
+**Between the two position snaps, order is still a decision, not an
+accident.** `CURVE_SNAPS = (tangent_continuity, heading_quantise)` - first
+match wins. **Tangent continuity goes first because it is a claim about the
+network, not about the one road being dragged.** A kink where two roads meet
+at a node is visible from across the map; nothing else in this list can cause
+it or cure it. Heading quantisation is a tidiness preference about a single
+road in isolation - a corner that reads as a clean 45 rather than 43. A
+15-degree-tidy road that still kinks at its own junction is a worse result
+than a junction that flows with one untidy leg, so tangent continuity is
+checked first and, where it applies, is the whole answer.
+
+**Why they can genuinely disagree.** `tangent_continuity` only ever fires for
+a control point adjacent to a node end (`index == 1` or
+`index == len(points) - 2`) - the one place a kink can exist - and even there
+only when another arm shares that node. `heading_quantise` has no such
+restriction: it fires for any interior point with two real neighbours,
+including the same one `tangent_continuity` claims. When both apply,
+`tests/test_curve_snap.py::test_snap_curve_prefers_tangent_continuity_when_both_apply`
+builds exactly that case and asserts the two candidates land at different
+points before checking `snap_curve` picked the first.
+
+**What this is not.** Nothing here decides which snap is *better* by any
+geometric measure - the order is fixed, not scored, because scoring two
+different kinds of correctness against each other (network-honest vs.
+angle-tidy) has no principled answer. Fixed precedence is the same choice D3
+made about `+left` being unconditional rather than resolved by a sign
+comparison every time: one rule, applied in one place, rather than a decision
+repeated - and possibly gotten wrong - at every call site.
+
+## D20. Connecting two roads by lane is a merge plus a datum, not a position
+
+**The symptom.** D18's lane handle lets a node's *position* line up with
+another lane. That alone never produces the taper the feature was asked for -
+a "5 lanes narrowing to 3, right-aligned" picture. The taper is
+`road/transition.py`'s, and it only paints at a real two-arm junction: two
+segments sharing one node. Position carries no alignment information once
+that is true - a shared point is a shared point - so two roads sitting near
+each other, each still with its own node, were never going to grow one.
+
+**Two new primitives, because neither existed.** `RoadNetwork.merge_nodes`
+(`road/network.py`) is the first thing in this codebase that connects two
+*already-drawn* nodes - `add_segment` only ever attaches a segment to nodes
+that already exist, and every snap that could have landed on another node
+(`MoveNodeTool._target`) has always excluded that candidate on purpose,
+because merging is a topology change a plain move must not casually cause.
+`RoadProfile.with_datum` (`road/profile.py`) is `mirrored()`'s sibling: the
+same cross-section, shifted sideways, named apart from its source for the
+same reason D-2 fixed `mirrored()` - a save file keys profiles by name, and
+two datums sharing one name is the same collision mirroring almost shipped.
+
+**The datum must be computed *after* the merge, not before.** Which lanes end
+up level with which is entirely a property of the dragged segment's tangent
+at the shared node - and that tangent is only settled once its near control
+point is actually pinned to the target's position and the path refits.
+`editor/lane_connect.py` runs the merge once, unrecorded, to read the
+resulting frame, computes the datum from it, then rewinds and hands back a
+`Composite` that redoes both steps as the caller's one undo entry - the same
+"do once to know the answer, then redo it recorded" shape `MoveNodeTool`
+already uses one level up for the frozen lever itself.
+
+**What "lining up" can and cannot mean.** For two roads meeting collinearly -
+a road narrowing or widening as it continues, exactly the picture asked for -
+the datum makes the chosen lane's *world position* land on the target's
+exactly: both tangents are parallel or antiparallel at the shared node, so a
+perpendicular offset in one frame is trivially the same line in the other,
+sign aside. At a genuine angle - a real T or Y - no scalar shift can put an
+arbitrary lane at an arbitrary world point; the two roads' "+left" directions
+are no longer the same line at all. What the datum still guarantees there is
+the one thing `road/transition.py` has always promised at any junction angle:
+the chosen lane's own local offset matches the target's, flipped the same way
+every other paired line at a joint already is. The exact-position claim is
+the collinear case; the local-offset claim is the general one -
+`tests/test_lane_connect.py` states both, and is explicit about where the
+boundary sits rather than overclaiming the second as the first.
+
+**Grabbing the plain centre handle never connects.** Only a drag that started
+on a lane or edge handle reaches `connect_by_lane` at all
+(`editor/tools/move_node.py:release`); dropping the centre handle on a lane
+handle still just moves the node to that handle's position, exactly as
+before D18. A centre-handle drag has no lane to align by, and D18's own
+alignment claim - "profile unchanged, lanes still parallel" - is what that
+handle was asked to keep meaning.

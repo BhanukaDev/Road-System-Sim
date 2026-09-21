@@ -254,7 +254,7 @@ def test_cancelling_a_drag_restores_the_node_and_records_nothing(ctx):
 def test_grabbing_empty_space_does_nothing(ctx):
     tool = MoveNodeTool()
     assert not tool.grab(ctx, Vec2(500.0, 500.0))
-    assert tool.node_id is None
+    assert tool.grab_state is None
 
 
 def test_dragging_a_node_moves_its_road_and_rebuilds_the_junction(ctx):

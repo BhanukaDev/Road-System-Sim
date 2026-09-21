@@ -83,6 +83,70 @@ def test_move_node_moves_every_attached_path_end():
     assert_vec(up.path.start.position, moved)
 
 
+# -- merging (D20) ---------------------------------------------------------
+
+
+def test_merge_nodes_repoints_every_touching_segment():
+    net = RoadNetwork()
+    dragged_end = Vec2(-10.0, 0.0)
+    dragged = straight(net, Vec2(-80.0, 0.0), dragged_end)
+    target_end = Vec2(10.0, 0.0)
+    target = straight(net, target_end, Vec2(80.0, 0.0))
+    dragged_id, target_id = net.node_at(dragged_end).id, net.node_at(target_end).id
+
+    net.merge_nodes(dragged_id, target_id)
+
+    assert dragged_id not in net.nodes
+    assert dragged.node_b == target_id
+    assert target.node_a == target_id
+    assert_vec(dragged.path.end.position, target_end)
+    assert net.nodes[target_id].segments == {dragged.id, target.id}
+
+
+def test_merge_nodes_is_a_no_op_on_itself():
+    net = RoadNetwork()
+    seg = straight(net, Vec2(0.0, 0.0), Vec2(50.0, 0.0))
+    before_position = net.nodes[seg.node_a].position
+    net.merge_nodes(seg.node_a, seg.node_a)
+    assert net.nodes[seg.node_a].position == before_position
+    assert seg.node_a in net.nodes
+
+
+def test_merge_nodes_marks_both_sides_dirty():
+    net = RoadNetwork()
+    dragged_end = Vec2(-10.0, 0.0)
+    dragged = straight(net, Vec2(-80.0, 0.0), dragged_end)
+    target_end = Vec2(10.0, 0.0)
+    straight(net, target_end, Vec2(80.0, 0.0))
+    dragged_id, target_id = net.node_at(dragged_end).id, net.node_at(target_end).id
+    net.rebuild_dirty()  # clean slate
+
+    net.merge_nodes(dragged_id, target_id)
+    assert net.dirty_nodes == frozenset({dragged.node_a, target_id})
+
+
+def test_merge_nodes_handles_a_loop_touching_the_dragged_node_at_both_ends():
+    """A loop only appears once in a node's own `.segments` set - both its
+    ends must still be repointed, or the untouched one dangles onto a node
+    this method is about to delete."""
+    net = RoadNetwork()
+    loop_node = net.add_node(Vec2(0.0, 0.0))
+    loop = net.add_segment(
+        loop_node.id,
+        loop_node.id,
+        [Vec2(0.0, 0.0), Vec2(40.0, 0.0), Vec2(20.0, 40.0), Vec2(0.0, 0.0)],
+        P,
+    )
+    target = net.add_node(Vec2(100.0, 100.0))
+
+    net.merge_nodes(loop_node.id, target.id)
+
+    assert loop.node_a == target.id
+    assert loop.node_b == target.id
+    assert_vec(loop.path.start.position, target.position)
+    assert_vec(loop.path.end.position, target.position)
+
+
 # -- splitting ------------------------------------------------------------
 
 
