@@ -74,6 +74,26 @@ MARKING_MIN_PX = 20.0
 """Below this on-screen carriageway length, markings are skipped rather than
 crammed - the same reasoning as `DIRECTION_ARROW_MIN_PX`."""
 
+CROSSWALK_DEPTH = 3.0
+"""Metres a crosswalk's zebra stripes run along the road, right at a real
+junction's mouth."""
+CROSSWALK_STRIPE_WIDTH = 0.5
+CROSSWALK_STRIPE_GAP = 0.5
+CROSSWALK_STOP_SETBACK = 1.2
+"""Metres between the stop line and the crosswalk it serves."""
+STOP_LINE_THICKNESS = 0.4
+"""Metres a stop line or crosswalk stripe runs, world-space (unlike a cap's
+pixel-space `STOP_LINE_WIDTH_PX` - this one has to stay a fixed width in a
+zebra crossing regardless of zoom)."""
+
+TURN_ARROW_LENGTH = 4.0
+"""Metres, a turn-decal arrow - bigger than a periodic `DIRECTION_ARROW`,
+since there is only one per lane rather than one every `DIRECTION_ARROW_SPACING`."""
+TURN_ARROW_SETBACK = 6.0
+"""Metres upstream of the stop line a turn decal sits."""
+TURN_ARROW_BEND_DEG = 34.0
+"""Degrees a turn branch bends off the lane's own travel direction."""
+
 PAN_KEY_SPEED_PX = 900.0
 """Keyboard and screen-edge pan speed, in *pixels* per second, converted to
 metres through `camera.zoom`. Pixels rather than metres for the same reason snap

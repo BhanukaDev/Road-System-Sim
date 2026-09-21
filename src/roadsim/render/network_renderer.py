@@ -2,9 +2,9 @@
 
 Order matters and is fixed here: lane ribbons bottom-up by layer, then lane
 markings on top of them, then junction surfaces filling the gaps the trims
-opened, then direction arrows on top of that. Lane colours are not decided
-here - `lane_style.py` owns that mapping, so a new lane type never touches
-this file.
+opened, then crosswalks and stop lines at real junctions, then direction
+arrows on top of that. Lane colours are not decided here - `lane_style.py`
+owns that mapping, so a new lane type never touches this file.
 
 Every ribbon is built at `camera.world_tolerance`, so the geometry gets finer as
 you zoom in and cheaper as you zoom out (D7).
@@ -12,19 +12,32 @@ you zoom in and cheaper as you zoom out (D7).
 
 from __future__ import annotations
 
+import math
+
 import pygame
 
 from .. import config
 from ..geometry import Vec2
 from ..road import RoadNetwork, RoadSegment
 from ..road.cap import Cap, CapKind
+from ..road.crosswalk import CrosswalkMark, crosswalk_mark
 from ..road.lane import Direction
 from ..road.pavement import build_pavement_bands
+from ..road.turn_arrows import TurnKind, turn_arrows
 from .camera import Camera
+from .crosswalk_renderer import draw_crosswalk
 from .curves import to_screen_points
 from .junction_renderer import draw_junction, draw_pavement_band
 from .lane_markings import draw_markings
 from .lane_style import LAYERS, style_for
+
+_TURN_BRANCHES: dict[TurnKind, tuple[float, ...]] = {
+    TurnKind.STRAIGHT: (0.0,),
+    TurnKind.LEFT: (config.TURN_ARROW_BEND_DEG,),
+    TurnKind.RIGHT: (-config.TURN_ARROW_BEND_DEG,),
+    TurnKind.STRAIGHT_LEFT: (0.0, config.TURN_ARROW_BEND_DEG),
+    TurnKind.STRAIGHT_RIGHT: (0.0, -config.TURN_ARROW_BEND_DEG),
+}
 
 
 class NetworkRenderer:
@@ -52,12 +65,20 @@ class NetworkRenderer:
 
         for junction in network.junctions.values():
             draw_junction(surface, camera, junction)
-            seg_by_key = {
-                (seg.id, at_a): seg
-                for seg, at_a in network.segments_at(junction.node_id)
-            }
+            ends = network.segments_at(junction.node_id)
+            seg_by_key = {(seg.id, at_a): seg for seg, at_a in ends}
             for band in build_pavement_bands(junction, seg_by_key):
                 draw_pavement_band(surface, camera, band)
+            if junction.is_crossing:
+                for segment, at_a in ends:
+                    if segment.is_broken:
+                        continue
+                    mark = crosswalk_mark(segment, at_a)
+                    if mark is None:
+                        continue
+                    draw_crosswalk(surface, camera, segment.path, mark)
+                    if self.show_arrows:
+                        self._draw_turn_arrows(surface, camera, segment, at_a, mark)
 
         for cap in network.caps.values():
             self._draw_cap(surface, camera, cap)
@@ -154,12 +175,56 @@ class NetworkRenderer:
         half: float,
         lane_width: float,
     ) -> None:
-        wing = min(lane_width * 0.22, half * 0.8)
-        tip = center + direction * half
         base = center - direction * half
+        self._draw_arrow_branch(
+            surface, camera, base, direction, half * 2.0, lane_width
+        )
+
+    def _draw_arrow_branch(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        base: Vec2,
+        direction: Vec2,
+        length: float,
+        lane_width: float,
+    ) -> None:
+        wing = min(lane_width * 0.22, length * 0.4)
+        tip = base + direction * length
         side = direction.rot90() * wing
         points = to_screen_points(camera, [tip, base + side, base - side])
         pygame.draw.polygon(surface, config.Color.DIRECTION_ARROW, points)
+
+    def _draw_turn_arrows(
+        self,
+        surface: pygame.Surface,
+        camera: Camera,
+        segment: RoadSegment,
+        at_a: bool,
+        mark: CrosswalkMark,
+    ) -> None:
+        """One decal per lane, upstream of the stop line - `turn_arrows` says
+        which shape. A single option is one `_draw_arrow`; two share a base so
+        they read as one arrow forking, not two arrows fighting for the spot."""
+        away = 1.0 if at_a else -1.0
+        s = segment.path.clamp_s(mark.stop_s + away * config.TURN_ARROW_SETBACK)
+        frame = segment.path.sample(s)
+        profile = segment.profile
+        length = config.TURN_ARROW_LENGTH
+        for arrow in turn_arrows(profile):
+            branches = _TURN_BRANCHES[arrow.kind]
+            center = frame.position + frame.normal * profile.lane_center(arrow.lane)
+            direction = frame.tangent * arrow.sign
+            lane_width = profile.lanes[arrow.lane].width
+            if len(branches) == 1:
+                self._draw_arrow(
+                    surface, camera, center, direction, length / 2.0, lane_width
+                )
+                continue
+            base = center - direction * (length / 2.0)
+            for degrees in branches:
+                bend = direction.rotated(math.radians(degrees))
+                self._draw_arrow_branch(surface, camera, base, bend, length, lane_width)
 
     def _draw_error(
         self, surface: pygame.Surface, camera: Camera, segment: RoadSegment
