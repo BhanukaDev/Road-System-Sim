@@ -6,6 +6,8 @@ depends on: offsets descend left to right, and they are exact.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from roadsim.road.lane import Direction, LaneSpec, LaneType
@@ -134,3 +136,56 @@ def test_every_shipped_preset_has_sane_extents(name: str):
     assert p.total_width > 0.0
     assert approx(p.extent_left + p.extent_right, p.total_width)
     assert p.half_width == max(p.extent_left, p.extent_right)
+
+
+# -- handedness -------------------------------------------------------------
+
+
+def _preset_with(name: str, drive_on_left: bool) -> RoadProfile:
+    """One preset as it would be built under a given handedness.
+
+    Presets are module-level constants, so the flag is read once at import; a
+    reload is the honest way to ask what the other convention would produce.
+    `reload` mutates the module in place and hands back the same object, so the
+    profile has to be read out *before* the module is restored - holding the
+    module itself would hand every caller whatever the last reload left behind.
+    """
+    from roadsim import config
+    from roadsim.road import presets
+
+    original = config.DRIVE_ON_LEFT
+    config.DRIVE_ON_LEFT = drive_on_left
+    try:
+        return getattr(importlib.reload(presets), name)
+    finally:
+        config.DRIVE_ON_LEFT = original
+        importlib.reload(presets)
+
+
+def test_handedness_reverses_lane_order_and_nothing_else():
+    """Which side a direction keeps to is the whole of handedness: the same
+    lanes, same types, same widths, read the other way round."""
+    right = _preset_with("AVENUE_FOUR_LANE", False)
+    left = _preset_with("AVENUE_FOUR_LANE", True)
+    assert left.name == right.name
+    assert left.lanes == tuple(reversed(right.lanes))
+    assert [lane.type for lane in left.lanes] == [
+        lane.type for lane in reversed(right.lanes)
+    ]
+    assert approx(left.total_width, right.total_width)
+
+
+def test_handedness_never_reverses_a_one_way_street():
+    """The trap the reversal avoids: flipping each lane's `direction` instead
+    would send `one_way_two_lane` B -> A, turning a mirror into a U-turn."""
+    for drive_on_left in (False, True):
+        p = _preset_with("ONE_WAY_TWO_LANE", drive_on_left)
+        assert p.forward_lanes and not p.backward_lanes
+
+
+def test_handedness_swaps_which_side_each_direction_keeps_to():
+    right = _preset_with("RESIDENTIAL_TWO_WAY", False)
+    left = _preset_with("RESIDENTIAL_TWO_WAY", True)
+    # `edges` descend left to right, so a larger lane centre is further left.
+    assert right.lane_center(right.forward_lanes[0]) < 0.0
+    assert left.lane_center(left.forward_lanes[0]) > 0.0

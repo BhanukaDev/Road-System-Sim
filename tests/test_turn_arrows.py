@@ -7,6 +7,7 @@ never about what a junction's other arms actually allow.
 
 from __future__ import annotations
 
+from roadsim import config
 from roadsim.road.lane import Direction, LaneSpec, LaneType
 from roadsim.road.presets import (
     ALLEY,
@@ -37,18 +38,23 @@ def test_two_same_direction_lanes_fork_left_and_right():
     )
 
 
-def test_the_median_side_lane_gets_the_left_option():
+def test_the_median_side_lane_turns_across_oncoming_traffic():
     """Median-adjacent is the passing lane in a real cross-section - it is the
-    one a left turn comes off, not the kerb lane."""
+    one the turn *across oncoming traffic* comes off, not the kerb lane.
+
+    Which turn that is, is the whole of handedness: drive on the right and you
+    cross oncoming traffic turning left; drive on the left and you cross it
+    turning right. Both groups' median-adjacent lane gets the same option,
+    because the median is each group's own inner edge.
+    """
+    across = TurnKind.STRAIGHT_RIGHT if config.DRIVE_ON_LEFT else TurnKind.STRAIGHT_LEFT
     profile = AVENUE_FOUR_LANE
     arrows = {a.lane: a for a in turn_arrows(profile)}
     median_index = next(
         k for k, lane in enumerate(profile.lanes) if lane.type is LaneType.MEDIAN
     )
-    left_of_median = median_index - 1
-    right_of_median = median_index + 1
-    assert arrows[left_of_median].kind is TurnKind.STRAIGHT_LEFT
-    assert arrows[right_of_median].kind is TurnKind.STRAIGHT_LEFT
+    assert arrows[median_index - 1].kind is across
+    assert arrows[median_index + 1].kind is across
 
 
 def test_a_middle_lane_among_three_goes_straight_only():

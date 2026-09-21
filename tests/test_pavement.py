@@ -112,3 +112,39 @@ def test_profile_change_keeps_pavements_inside_their_kerbs():
             RESIDENTIAL_TWO_WAY.lanes[0].width,
             1e-6,
         )
+
+
+def test_a_shallow_merge_gets_a_footway_round_its_nose_not_a_quad_across_it():
+    """The symptom that made shallow Y junctions unbuildable.
+
+    With no fillet at the corner, `build_pavement_bands` falls back to a
+    straight quad between the two mouths - and at a shallow angle those mouths
+    are tens of metres apart on either side of both carriageways, so the
+    "footway" was a long thin slab laid over the road. A gore nose gives the
+    band a real arc to follow, concentric by construction.
+    """
+    import math
+
+    net = RoadNetwork()
+    length = 200.0
+    net.connect(Vec2(-length, 0.0), ORIGIN, NARROW)
+    net.connect(ORIGIN, Vec2(length, 0.0), NARROW)
+    radians = math.radians(10.0)
+    net.connect(
+        ORIGIN,
+        Vec2(length * math.cos(radians), length * math.sin(radians)),
+        NARROW,
+    )
+    net.rebuild_all()
+
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    assert not junction.is_degenerate
+    ends = net.segments_at(junction.node_id)
+    bands = build_pavement_bands(junction, {(s.id, at_a): s for s, at_a in ends})
+
+    nose = [b for b in bands if b.curb is not None]
+    assert nose, "the gore corner fell back to a straight quad"
+    for band in nose:
+        # Concentric, and the carriageway-facing edge is the larger radius.
+        assert_vec(band.curb.center, band.inner.center)
+        assert band.inner.radius > band.curb.radius

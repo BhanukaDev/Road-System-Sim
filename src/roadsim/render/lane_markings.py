@@ -21,7 +21,7 @@ from ..road.profile import RoadProfile
 from .camera import Camera
 from .curves import to_screen_points
 
-_COLOR: dict[MarkingKind, tuple[int, int, int]] = {
+MARKING_COLOR: dict[MarkingKind, tuple[int, int, int]] = {
     MarkingKind.LANE_DIVIDER: config.Color.MARKING_WHITE,
     MarkingKind.CENTER_LINE: config.Color.MARKING_YELLOW,
     MarkingKind.MEDIAN_EDGE: config.Color.MARKING_YELLOW,
@@ -44,7 +44,7 @@ def draw_markings(
         ribbon = build_ribbon(path, marking.offset, marking.offset, tolerance, s0, s1)
         stations = [section.s for section in ribbon.sections]
         points = [section.left for section in ribbon.sections]
-        color = _COLOR[marking.kind]
+        color = MARKING_COLOR[marking.kind]
         if marking.kind.is_dashed:
             _draw_dashed(surface, camera, stations, points, color)
         else:
@@ -66,7 +66,7 @@ def _draw_dashed(
         return
     s0, s1 = stations[0], stations[-1]
     width = round(config.MARKING_WIDTH_PX)
-    for dash_s0, dash_s1 in _dash_intervals(s0, s1):
+    for dash_s0, dash_s1 in dash_intervals(s0, s1):
         strip = [
             _point_at(stations, points, s)
             for s in _boundaries_in(stations, dash_s0, dash_s1)
@@ -76,7 +76,7 @@ def _draw_dashed(
             pygame.draw.lines(surface, color, False, screen, width)
 
 
-def _dash_intervals(s0: float, s1: float) -> list[tuple[float, float]]:
+def dash_intervals(s0: float, s1: float) -> list[tuple[float, float]]:
     """(start, end) arc-length spans of paint, phase-locked to the centreline
     itself (not to `s0`) so a dash never jumps as a junction's trim changes."""
     period = config.MARKING_DASH_LENGTH + config.MARKING_GAP_LENGTH

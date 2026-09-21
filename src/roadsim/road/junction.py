@@ -23,14 +23,25 @@ from ..geometry import (
     Curve,
     DegenerateOffsetError,
     Fillet,
+    Path,
     Vec2,
     corner_fillet,
-    curve_curve,
     deflection,
+    is_simple,
+    path_intersections,
     ray_ray,
 )
 from .profile import RoadProfile
 from .segment import RoadSegment
+
+_REACH_EPS = 1e-9
+"""A projection this close to the far end of a road counts as having run off
+it - see `_reach`."""
+
+_GORE_PHI = math.pi - math.radians(config.GORE_ANGLE_DEG)
+"""Deflection above which a corner is a gore nose. `phi` is measured between
+the direction arriving and the direction leaving, so two arms `eps` apart make
+a corner of `pi - eps`: shallow arms are a *large* deflection."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +90,16 @@ class Junction:
     """One entry per CCW-adjacent pair of ends: `corners[i]` rounds the gap
     between `ends[i]` and `ends[(i + 1) % len(ends)]`. `None` where there is no
     corner worth rounding - squeezed below `MIN_RADIUS`, or no room at all."""
+    is_degenerate: bool = False
+    """This node has no honest junction geometry, and nothing should be filled
+    from it.
+
+    Two ways to earn it, both of which used to be drawn anyway: a pair of arms
+    whose kerbs do not separate within the budget either road can give (a
+    shallow merge on roads too short to hold the gore it needs), and a mouth
+    ring that crosses itself. The first drew two carriageways through each
+    other, the second filled as bowties and holes. Flagged rather than raised,
+    and drawn loudly - the same discipline as `RoadSegment.is_degenerate`."""
 
     @property
     def is_crossing(self) -> bool:
@@ -103,11 +124,12 @@ def build_junction(
         return None
 
     seg_by_key = {(seg.id, at_a): seg for seg, at_a in segments}
-    demand, corners = _solve_trims(ends, seg_by_key, position)
+    demand, corners, unresolved = _solve_trims(ends, seg_by_key, position)
     lookup = {(seg.id, at_a): demand[(seg.id, at_a)] for seg, at_a in segments}
     polygon = _polygon(ends, segments, lookup)
+    degenerate = unresolved or not is_simple(polygon)
     return Junction(
-        node_id, position, tuple(ends), lookup, polygon, tuple(corners)
+        node_id, position, tuple(ends), lookup, polygon, tuple(corners), degenerate
     )
 
 
@@ -137,7 +159,7 @@ def _solve_trims(
     ends: list[SegmentEnd],
     seg_by_key: dict[tuple[int, bool], RoadSegment],
     node_position: Vec2,
-) -> tuple[dict[tuple[int, bool], float], list[Fillet | None]]:
+) -> tuple[dict[tuple[int, bool], float], list[Fillet | None], bool]:
     """Each end pulls back far enough to clear every neighbour it shares a
     corner with, and never less than its own half-width.
 
@@ -152,6 +174,7 @@ def _solve_trims(
     n = len(ends)
     demand = {(e.segment_id, e.at_a): e.half_width for e in ends}
     corners: list[Fillet | None] = [None] * n
+    unresolved = False
     for i, a in enumerate(ends):
         b = ends[(i + 1) % n]
         if a is b:
@@ -163,12 +186,13 @@ def _solve_trims(
         result = _pair_demand(a, b, seg_a, seg_b, node_position)
         if result is None:
             continue
-        fillet, reach_a, reach_b = result
+        fillet, reach_a, reach_b, pair_unresolved = result
         key_a, key_b = (a.segment_id, a.at_a), (b.segment_id, b.at_a)
         demand[key_a] = max(demand[key_a], reach_a)
         demand[key_b] = max(demand[key_b], reach_b)
         corners[i] = fillet
-    return demand, corners
+        unresolved = unresolved or pair_unresolved
+    return demand, corners, unresolved
 
 
 def _pair_demand(
@@ -177,7 +201,7 @@ def _pair_demand(
     seg_a: RoadSegment,
     seg_b: RoadSegment,
     node_position: Vec2,
-) -> tuple[Fillet | None, float, float] | None:
+) -> tuple[Fillet | None, float, float, bool] | None:
     """The corner between `a` and `b`, and how far back each end must pull.
 
     `b` is the next end counter-clockwise, so it sits to `a`'s left: the corner
@@ -204,9 +228,18 @@ def _pair_demand(
     if apex is None:
         return None
 
-    limit = config.JUNCTION_MAX_TRIM_FACTOR * max(a.half_width, b.half_width)
-    reach_a = min(_reach(seg_a, a.at_a, apex), limit)
-    reach_b = min(_reach(seg_b, b.at_a, apex), limit)
+    floor = config.JUNCTION_MAX_TRIM_FACTOR * max(a.half_width, b.half_width)
+    limit_a, limit_b = _trim_budget(seg_a, floor), _trim_budget(seg_b, floor)
+    raw_a, raw_b = _reach(seg_a, a.at_a, apex), _reach(seg_b, b.at_a, apex)
+
+    # Unresolved means the kerbs do not separate inside what either road can
+    # give. The old code clamped to the cap and carried on, which is precisely
+    # how two shallow arms ended up drawn through each other.
+    unresolved = (
+        raw_a is None or raw_b is None or raw_a > limit_a or raw_b > limit_b
+    )
+    reach_a = min(limit_a if raw_a is None else raw_a, limit_a)
+    reach_b = min(limit_b if raw_b is None else raw_b, limit_b)
 
     into, out_of = -a.outgoing_dir, b.outgoing_dir
     pull_a, pull_b = seg_a.pull_at(a.at_a), seg_b.pull_at(b.at_a)
@@ -216,15 +249,27 @@ def _pair_demand(
         into,
         out_of,
         radius,
-        _room(seg_a, a, reach_a, limit),
-        _room(seg_b, b, reach_b, limit),
+        _room(seg_a, a, reach_a, limit_a),
+        _room(seg_b, b, reach_b, limit_b),
     )
     tangent = 0.0 if fillet is None else fillet.tangent_length(apex)
     return (
         fillet,
         max(reach_a + tangent, a.half_width),
         max(reach_b + tangent, b.half_width),
+        unresolved,
     )
+
+
+def _trim_budget(segment: RoadSegment, floor: float) -> float:
+    """How far this arm may be pulled back before the junction is giving up.
+
+    A width multiple alone has no angle term, and a shallow merge's demand is
+    all angle - so the budget also grows with the arm's own length, which is
+    what lets a long ramp hold the long gore it genuinely needs while a stub
+    still cannot be eaten by its own junction (`config.JUNCTION_MAX_TRIM_FACTOR`).
+    """
+    return max(floor, config.JUNCTION_MAX_TRIM_FRACTION * segment.path.length)
 
 
 def _room(
@@ -249,28 +294,50 @@ def _exact_apex(
     node_position: Vec2,
 ) -> Vec2 | None:
     """The real crossing of `a`'s left kerb and `b`'s right kerb, or `None` when
-    there is none nearby - parallel-enough kerbs, or a kerb offset that would
-    collapse the arc it comes from (D1's `DegenerateOffsetError`)."""
-    try:
-        kerb_a = _kerb_piece(seg_a, a, left=True)
-        kerb_b = _kerb_piece(seg_b, b, left=False)
-    except DegenerateOffsetError:
+    there is none at all - kerbs parallel the whole way, or a kerb offset that
+    would collapse the arc it comes from (D1's `DegenerateOffsetError`).
+
+    Searched along the whole kerb rather than just the end piece. Two arms at a
+    shallow angle cross tens of metres out, which is off the end of any one
+    piece: looking only at the first piece reports "no crossing", falls through
+    to the tangent-ray fallback, and the result was then capped back to a trim
+    that left the two carriageways overlapping.
+    """
+    kerb_a = _kerb_run(seg_a, a, left=True)
+    kerb_b = _kerb_run(seg_b, b, left=False)
+    if kerb_a is None or kerb_b is None:
         return None
-    hits = curve_curve(kerb_a, kerb_b)
+    hits = path_intersections(kerb_a, kerb_b)
     if not hits:
         return None
     return min(hits, key=lambda hit: hit.point.distance_to(node_position)).point
 
 
-def _kerb_piece(segment: RoadSegment, end: SegmentEnd, *, left: bool) -> Curve:
-    """The segment's own end piece, offset out to the kerb `end` names.
+def _kerb_run(segment: RoadSegment, end: SegmentEnd, *, left: bool) -> Path | None:
+    """The kerb `end` names, from the node outward for as far as it offsets.
 
-    Only the one piece nearest the node - `fit_polyline` guarantees some
-    straight run at every end, so the corner this feeds is almost always
-    against that straight, and never against a piece the node isn't part of.
+    Walking outward from the node and stopping at the first piece that cannot
+    take the offset keeps the run contiguous with the mouth: a tight curve
+    further along the road ends the search rather than punching a hole in the
+    middle of it. `None` when even the first piece collapses.
+
+    Pieces are collected outward but returned in the path's own A -> B order,
+    because that is the only order in which they chain into a valid `Path`.
     """
-    piece = segment.path.pieces[0] if end.at_a else segment.path.pieces[-1]
-    return piece.offset(_physical_offset(end, left=left))
+    d = _physical_offset(end, left=left)
+    pieces = segment.path.pieces
+    outward = pieces if end.at_a else tuple(reversed(pieces))
+    run: list[Curve] = []
+    for piece in outward:
+        try:
+            run.append(piece.offset(d))
+        except DegenerateOffsetError:
+            break
+    if not run:
+        return None
+    if not end.at_a:
+        run.reverse()
+    return Path(tuple(run))
 
 
 def _physical_offset(end: SegmentEnd, *, left: bool) -> float:
@@ -282,18 +349,27 @@ def _physical_offset(end: SegmentEnd, *, left: bool) -> float:
     return magnitude if left == end.at_a else -magnitude
 
 
-def _reach(segment: RoadSegment, at_a: bool, point: Vec2) -> float:
-    """Arc length from the node to `point`'s projection onto the end piece.
+def _reach(segment: RoadSegment, at_a: bool, point: Vec2) -> float | None:
+    """Arc length from the node to `point`'s foot on this arm's centreline, or
+    `None` when that foot runs off the far end of the road.
 
-    Works for a straight or a curved end piece alike: `Curve.project` measures
-    along the piece's own parameterisation, and offsetting never changes that
-    parameterisation (a line keeps its direction, an arc keeps its centre and
-    angles), so the same call answers this for an exact kerb hit or a ray
-    fallback's near-miss.
+    Measured on the centreline rather than on the kerb because the trim *is* a
+    centreline arc length - it is the station `_polygon` samples to build the
+    mouth. For a straight end the two agree exactly; on an arc they do not,
+    because offsetting changes a curve's radius and therefore its length.
+
+    The `None` matters as much as the number. `Path.project` clamps (D11's
+    warning about `project` not being a containment test), so an apex beyond
+    the end of the road comes back *at* the end looking like a reachable
+    answer. Taken at face value that is the shallow-Y overlap: a mouth placed
+    where the kerbs have not separated yet.
     """
-    piece = segment.path.pieces[0] if at_a else segment.path.pieces[-1]
-    s_local = piece.project(point)
-    return s_local if at_a else piece.length - s_local
+    path = segment.path
+    s = path.project(point)
+    reach = s if at_a else path.length - s
+    if reach >= path.length - _REACH_EPS:
+        return None
+    return max(reach, 0.0)
 
 
 def _target_radius(phi: float, pull_a: float | None, pull_b: float | None) -> float:
@@ -306,7 +382,16 @@ def _target_radius(phi: float, pull_a: float | None, pull_b: float | None) -> fl
     candidates = [
         pull / half for pull in (pull_a, pull_b) if pull is not None and half > 1e-9
     ]
-    return min(candidates) if candidates else config.JUNCTION_CORNER_RADIUS
+    if candidates:
+        return min(candidates)
+    # A near-straight-through corner is a merge, not a turn, and wants a gore
+    # nose's tight kerb. Asking for `JUNCTION_CORNER_RADIUS` there needs a
+    # tangent of `radius * tan(phi / 2)` - ~69 m at 6 m and 170 degrees - which
+    # the room available clamps until the fitted radius collapses below
+    # `MIN_RADIUS` and `corner_fillet` gives up entirely.
+    if phi > _GORE_PHI:
+        return config.GORE_NOSE_RADIUS
+    return config.JUNCTION_CORNER_RADIUS
 
 
 def _polygon(

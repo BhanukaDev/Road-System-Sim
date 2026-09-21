@@ -19,7 +19,7 @@ from .intersect import (
 )
 from .line import LineSegment
 from .path import Path
-from .polygon import is_ccw, signed_area
+from .polygon import is_ccw, is_simple, signed_area
 from .ribbon import CrossSection, Ribbon, build_ribbon
 from .vec import Vec2
 
@@ -47,6 +47,7 @@ __all__ = [
     "fit_freehand",
     "fit_polyline",
     "is_ccw",
+    "is_simple",
     "line_arc",
     "line_bounds",
     "line_line",

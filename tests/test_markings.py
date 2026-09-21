@@ -56,12 +56,27 @@ def test_two_same_direction_lanes_get_one_dashed_divider():
 
 
 def test_a_median_is_bounded_by_two_solid_yellow_edges():
+    # Located by type rather than by index: `config.DRIVE_ON_LEFT` reverses a
+    # preset's lane order, and "the median is bounded on both sides" is the
+    # invariant either way.
     p = ASYMMETRIC_BOULEVARD
     kinds = by_kind(p)
+    median = next(k for k, lane in enumerate(p.lanes) if lane.type is LaneType.MEDIAN)
     assert len(kinds[MarkingKind.MEDIAN_EDGE]) == 2
-    assert kinds[MarkingKind.MEDIAN_EDGE] == [approx_edge(p, 2), approx_edge(p, 3)]
-    # The two forward lanes still get their own dashed divider.
-    assert kinds[MarkingKind.LANE_DIVIDER] == [approx_edge(p, 4)]
+    assert kinds[MarkingKind.MEDIAN_EDGE] == [
+        approx_edge(p, median),
+        approx_edge(p, median + 1),
+    ]
+    # The two same-direction lanes still get their own dashed divider, wherever
+    # the pair of them ended up.
+    pair = next(
+        k
+        for k in range(len(p.lanes) - 1)
+        if p.lanes[k].type is LaneType.CAR
+        and p.lanes[k + 1].type is LaneType.CAR
+        and p.lanes[k].direction is p.lanes[k + 1].direction
+    )
+    assert kinds[MarkingKind.LANE_DIVIDER] == [approx_edge(p, pair + 1)]
 
 
 def test_a_track_lane_carries_no_markings_at_all():

@@ -38,14 +38,18 @@ def draw_crosswalk(
         )
         offset += period
 
+    # The stop line holds back the approach half only, never the full width the
+    # stripes cover - see `CrosswalkMark.stop_left`.
+    if not mark.has_stop_line:
+        return
     half_stop = config.STOP_LINE_THICKNESS / 2.0
     _draw_band(
         surface,
         camera,
         path,
         tolerance,
-        mark.left,
-        mark.right,
+        mark.stop_left,
+        mark.stop_right,
         mark.stop_s - half_stop,
         mark.stop_s + half_stop,
     )

@@ -25,7 +25,8 @@ uv run pytest tests/test_arc.py -v
 ```
 src/roadsim/
   geometry/   pure maths: vec, curve, line, arc, path, fitting, ribbon
-  road/       lanes, profiles, nodes, segments, junctions, network
+  road/       lanes, profiles, nodes, segments, junctions, network,
+              markings, crosswalks, decals, lane transitions
   render/     camera, grid, curve drawing, network renderer, HUD
   editor/     commands/undo, snapping, tools, shapers, guides, overlay
   ui/         widgets, bars, panels - every bar generated from a registry
@@ -34,6 +35,8 @@ src/roadsim/
   scenes/     one Scene subclass per app surface, in scenes/__init__.py
   config.py   tunables and palette - no magic numbers elsewhere
   app.py      window, loop, camera controls shared by every scene
+tools/        offline build scripts, not shipped (SVG -> decal polygons)
+assets/       provenance for anything converted from outside this repo
 docs/         architecture, decisions, per-milestone design notes
 tests/        pytest, geometry-focused
 ```
@@ -50,7 +53,8 @@ tests/        pytest, geometry-focused
    in something large. Tools register in `editor/toolbox.py`, road shapes in
    `editor/shapers/__init__.py`, modes in `modes/__init__.py`, scenes in
    `scenes/__init__.py`, lane types in `road/lane.py`, curve-pair intersections in
-   `geometry/intersect.py`. The interface is generated from those same registries,
+   `geometry/intersect.py`, painted markings in `road/decal.py`. The interface
+   is generated from those same registries,
    so a new entry appears on screen without `ui/` learning its name.
 3. **Every network mutation goes through a `Command`** with `do`/`undo`
    (`editor/commands.py`, M2). No tool mutates the network directly.
@@ -115,6 +119,28 @@ Landed so far:
   maths to `fillet.py`, with `tests/test_fitting.py` passing unchanged as proof.
 - **Game interface and modes.** `ui/` and `modes/`; `scenes/game.py` is the
   default scene, opening in view mode with a road mode beside it.
+- **Markings that tell the truth about direction.** A stop line covers the
+  approach half of a mouth only - the lanes arriving there - so the two ends of
+  a road are marked on opposite halves instead of identically. Turn decals
+  follow the same rule and appear only on approaching lanes. The zebra still
+  spans the whole carriageway, because a pedestrian crosses all of it.
+- **Shallow merges build.** A Y at a smooth angle used to draw both
+  carriageways through each other with the footway slung across the pair.
+  `road/junction.py` now searches the whole kerb for the real crossing, budgets
+  the trim against each arm's own length rather than a width multiple, and
+  rounds the wedge with a gore nose instead of asking for a corner radius that
+  collapses. A node that still cannot resolve sets `Junction.is_degenerate` and
+  is drawn loudly rather than overlapped (D13).
+- **Real road decals.** `tools/import_markings.py` converts TPDM marking SVGs
+  offline into polygon rings (`road/decal_library.py`); `road/decal.py` and
+  `render/decal_renderer.py` place them. Nothing at runtime reads SVG. See
+  `assets/markings/ATTRIBUTION.md` - **the source carries no licence**, so treat
+  the shapes as placeholders until that is cleared (D14).
+- **Lane transitions are painted.** `road/transition.py` carries markings across
+  a 2-lanes-become-4 patch - the centre line, a median folding back onto it,
+  tapering dividers - and puts a merge arrow where a lane runs out (D15).
+- **Handedness.** `config.DRIVE_ON_LEFT`, default left. It reverses a preset's
+  lane order and nothing else (D16).
 
 Still to come: previews that show the real road, end caps, lane anchors and
 alignment guides; shapers (straight / curve / freeform / continuous), loops,
@@ -122,7 +148,8 @@ bulldoze and replace; levels, colliders and crossings; then exact junction trims
 rounded corners, the corner handle and pavements.
 
 `--scene editor` keeps M2's road-only shell, `--scene network` the hardcoded
-showcase and `--scene debug` M1's geometry surface.
+showcase - which now includes a shallow gore and a lane taper - and
+`--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D11 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D16 are this
 milestone's.

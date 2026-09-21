@@ -8,6 +8,7 @@ an ordered lane list and a datum - so moving them out is a loader, not a rewrite
 
 from __future__ import annotations
 
+from .. import config
 from .lane import Direction, LaneSpec, LaneType
 from .profile import RoadProfile
 
@@ -26,7 +27,20 @@ _B, _F, _2, _0 = Direction.BACKWARD, Direction.FORWARD, Direction.BOTH, Directio
 
 
 def _p(name: str, *lanes: LaneSpec, datum: float = 0.0) -> RoadProfile:
-    return RoadProfile(name, tuple(lanes), datum)
+    """Every preset below is authored drive-on-right, left to right of A -> B.
+
+    Handedness is then one reversal (`config.DRIVE_ON_LEFT`): mirroring the
+    lane *order* is the whole of it, because which side a travel direction
+    keeps to is the only thing that changes. Flipping each lane's `direction`
+    instead would look equivalent on a two-way street and be wrong on a one-way
+    one - `one_way_two_lane` would start pointing B -> A, reversing a road
+    against the direction it was drawn in rather than mirroring it.
+
+    The name is untouched, so `mirrored()`'s name involution (D-2) and the
+    profile-by-name keys in a save file mean the same thing either way.
+    """
+    ordered = tuple(reversed(lanes)) if config.DRIVE_ON_LEFT else tuple(lanes)
+    return RoadProfile(name, ordered, -datum if config.DRIVE_ON_LEFT else datum)
 
 
 ALLEY = _p(

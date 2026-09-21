@@ -13,6 +13,21 @@ MIN_ZOOM = 0.5
 MAX_ZOOM = 120.0
 ZOOM_STEP = 1.15
 
+DRIVE_ON_LEFT = True
+"""Which side traffic keeps to. Handedness is a property of the *cross-section*,
+not of any geometry: it decides which side of a two-way road each travel
+direction sits on, so `presets.py` is its only consumer - it reverses a preset's
+lane order, and nothing else in the codebase asks.
+
+Deliberately not consulted by `turn_arrows.py`: "you turn left from the leftmost
+lane of your own direction group, right from the rightmost" is true under both
+conventions. What changes is which of those edges is the kerb and which is the
+centreline, and the reversed lane order already says that.
+
+Not stored in a save file, and it does not need to be: `serialization/schema.py`
+writes every `LaneSpec` in full, so a network keeps the handedness it was built
+with even if this flag later flips."""
+
 GRID_SPACING = 10.0
 """Metres between minor grid lines."""
 GRID_MAJOR_EVERY = 10
@@ -24,13 +39,39 @@ DEFAULT_CORNER_RADIUS = 12.0
 """Metres. The fillet radius the draw tool asks for at each corner."""
 
 JUNCTION_MAX_TRIM_FACTOR = 3.0
-"""Cap on how far a junction may push an arm back, in multiples of the widest
-arm's half-width. Two arms meeting at a shallow angle have kerbs that cross
-almost at infinity, so the raw intersection is unbounded; without this, dragging
-a node to a shallow angle inflates the junction until it eats its own roads.
-Still needed even with exact curve-curve trimming: it is what bounds the
-tangent-ray fallback for kerbs too near parallel to cross within either arm's
-end piece."""
+"""Floor on an arm's trim budget, in multiples of the widest arm's half-width.
+
+This used to be the whole cap, and as a cap it was the bug behind overlapping
+Y junctions: it has no angle term, so two arms meeting at 10 degrees stopped
+~16 m from the node while their kerbs did not actually separate for ~60 m, and
+the two carriageways were drawn through each other. It survives as the *floor*
+of `_trim_budget`, which is what it was always good at - keeping a short stub's
+junction from being measured against nothing at all."""
+
+JUNCTION_MAX_TRIM_FRACTION = 0.45
+"""The rest of an arm's trim budget: a fraction of that arm's *own* length.
+
+A shallow merge is genuinely long - a real ramp gore runs for tens of metres -
+so the budget has to be able to grow with the angle. Tying it to the road's own
+length is what lets it: a long ramp can give 90 m to a gore, while a short stub
+still cannot be swallowed by its own junction. An arm that needs more than this
+is not trimmed to fit and overlapped anyway; the junction is flagged
+`is_degenerate` and drawn loudly instead."""
+
+GORE_ANGLE_DEG = 30.0
+"""Below this angle between two arms, the corner between them is a gore nose
+rather than an ordinary junction corner - a merge, not a turn."""
+
+GORE_NOSE_RADIUS = 0.6
+"""Metres. The kerb radius at the nose of a gore.
+
+`JUNCTION_CORNER_RADIUS` is wrong here and was the second half of the shallow-Y
+bug: at a near-straight-through corner `corner_fillet` needs a tangent length of
+`radius * tan(phi / 2)`, which at 6 m and 170 degrees is ~69 m of kerb. Clamped
+by the room available, the fitted radius collapsed below `MIN_RADIUS` and the
+fillet came back `None` - leaving a flat cut across the wedge and a pavement
+band stretched over both carriageways. A real gore nose is a tight kerb, and at
+that radius the tangent is a few metres and the arc survives."""
 
 JUNCTION_CORNER_RADIUS = 6.0
 """Metres. Default fillet radius rounding a junction corner, before a user's
@@ -91,8 +132,27 @@ TURN_ARROW_LENGTH = 4.0
 since there is only one per lane rather than one every `DIRECTION_ARROW_SPACING`."""
 TURN_ARROW_SETBACK = 6.0
 """Metres upstream of the stop line a turn decal sits."""
-TURN_ARROW_BEND_DEG = 34.0
-"""Degrees a turn branch bends off the lane's own travel direction."""
+TRANSITION_ARROW_LENGTH = 9.0
+"""Metres, the merge arrow painted where a lane is about to run out. Longer
+than a turn decal because it is read further ahead - a driver acts on it before
+reaching the taper, not at a stop line."""
+
+TRANSITION_ARROW_LANE_FRACTION = 0.85
+"""A merge arrow is a wide shape and it spans most of its lane on a real road,
+so it gets more room than `TURN_ARROW_LANE_FRACTION` allows a turn decal.
+Held below 1.0 all the same: a marking that touches the lane line it is telling
+you to cross reads as the line being broken."""
+
+TRANSITION_ARROW_SETBACK = 12.0
+"""Metres back up its own road from the transition mouth. A merge arrow is an
+instruction to change lane, so it has to arrive with room to act on it."""
+
+TURN_ARROW_LANE_FRACTION = 0.6
+"""How much of a lane's width a turn decal may take up.
+
+Decals are scaled uniformly - squashing an arrow sideways would make it a
+different marking - so a lane too narrow for the arrow at
+`TURN_ARROW_LENGTH` gets a shorter one, not a thinner one."""
 
 PAN_KEY_SPEED_PX = 900.0
 """Keyboard and screen-edge pan speed, in *pixels* per second, converted to

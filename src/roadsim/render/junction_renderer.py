@@ -24,6 +24,14 @@ def draw_junction(surface: pygame.Surface, camera: Camera, junction: Junction) -
     if len(outline) < 3:
         return
     points = to_screen_points(camera, outline)
+    if junction.is_degenerate:
+        # No honest surface here - the mouths overlap, or the ring crosses
+        # itself. Filling it anyway is what made a shallow-Y merge look like a
+        # rendering glitch instead of geometry that could not be solved, so it
+        # is outlined loudly and left unfilled (the same call `is_broken`
+        # segments get in `network_renderer`).
+        pygame.draw.lines(surface, config.Color.SEGMENT_ERROR, True, points, 2)
+        return
     pygame.draw.polygon(surface, config.Color.JUNCTION_FILL, points)
 
 

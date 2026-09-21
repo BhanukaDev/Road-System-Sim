@@ -7,7 +7,7 @@ flickers in and out of the junction as it slides along the edge.
 
 from __future__ import annotations
 
-from roadsim.geometry import Vec2, is_ccw, signed_area
+from roadsim.geometry import Vec2, is_ccw, is_simple, signed_area
 from roadsim.geometry.polygon import contains
 
 from .conftest import approx
@@ -79,3 +79,49 @@ def test_a_point_level_with_two_vertices_is_not_double_counted():
     answer. Level with the notch, outside it, must read outside."""
     assert not contains(L_SHAPE, Vec2(20.0, 4.0))
     assert contains(L_SHAPE, Vec2(2.0, 4.0))
+
+
+# -- self-intersection ------------------------------------------------------
+
+
+def test_a_convex_ring_is_simple():
+    assert is_simple([Vec2(0.0, 0.0), Vec2(4.0, 0.0), Vec2(4.0, 4.0), Vec2(0.0, 4.0)])
+
+
+def test_a_concave_ring_is_still_simple():
+    """Concave is not the same as broken - a junction surface is usually both
+    concave and perfectly fillable."""
+    assert is_simple(
+        [Vec2(0.0, 0.0), Vec2(4.0, 0.0), Vec2(4.0, 4.0), Vec2(2.0, 1.0), Vec2(0.0, 4.0)]
+    )
+
+
+def test_a_bowtie_is_not_simple():
+    """The shape a shallow junction's mouth ring used to make. Filled, it is
+    bowties and holes that read as a rendering glitch."""
+    assert not is_simple(
+        [Vec2(0.0, 0.0), Vec2(4.0, 0.0), Vec2(0.0, 4.0), Vec2(4.0, 4.0)]
+    )
+
+
+def test_a_ring_that_only_grazes_itself_is_not_simple():
+    """Touching at a point that is not a shared edge leaves no honest inside."""
+    assert not is_simple(
+        [
+            Vec2(0.0, 0.0),
+            Vec2(4.0, 0.0),
+            Vec2(2.0, 2.0),
+            Vec2(4.0, 4.0),
+            Vec2(0.0, 4.0),
+            Vec2(2.0, 2.0),
+        ]
+    )
+
+
+def test_a_ring_needs_three_points_to_be_simple_at_all():
+    assert not is_simple([Vec2(0.0, 0.0), Vec2(1.0, 0.0)])
+
+
+def test_winding_direction_does_not_change_simplicity():
+    ring = [Vec2(0.0, 0.0), Vec2(4.0, 0.0), Vec2(4.0, 4.0), Vec2(0.0, 4.0)]
+    assert is_simple(ring) is is_simple(list(reversed(ring)))

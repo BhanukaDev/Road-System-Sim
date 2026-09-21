@@ -366,6 +366,27 @@ Geometry stays at `EXACT = 1e-9`. Invariants, not implementations.
 
 ---
 
+## Landed beyond the original list
+
+Three things were brought forward or found while building, and are recorded in
+`docs/decisions.md` rather than here:
+
+- **Shallow merges (D13).** Item 10's "extreme shapes pass" turned out to have a
+  sharper case than the collider was going to catch: a Y at a smooth angle drew
+  both carriageways through each other. Fixed in `road/junction.py` with an
+  angle-honest trim budget and a gore nose, plus `Junction.is_degenerate` and
+  `geometry/polygon.is_simple` for the cases that still cannot resolve.
+- **Decals (D14).** Turn arrows are the real TPDM markings now, converted to
+  polygons offline by `tools/import_markings.py`. **The source carries no
+  licence** - see `assets/markings/ATTRIBUTION.md` before relying on them.
+- **Lane transitions (D15).** `road/transition.py` paints the patch where a
+  road changes lane count. Its lane pairing is geometric and deliberately
+  *not* the connectivity model D5 reserves for M4/M5.
+
+Stop lines and turn decals also stopped spanning the whole carriageway: both now
+cover the approach half of a mouth only. Handedness arrived as
+`config.DRIVE_ON_LEFT` (D16), defaulting to drive-on-left.
+
 ## Deferred, deliberately
 
 - Pedestrian **crossings** across junction mouths - M4. Pavement _continuity_ is in.

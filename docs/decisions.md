@@ -303,3 +303,159 @@ sidewalk on either connecting arm gets no band, not an empty one.
 the milestone plan bundled them with, because nothing about them needs a level
 to exist. They are additive and optional - omitted entirely when unset - so the
 save format did not need a version bump to gain them.
+
+---
+
+## D13. A shallow merge is a gore, and the nose radius was the other half of it
+
+**The symptom:** a Y junction at a shallow angle - a ramp merge, and more
+generally any road leaving another at a smooth angle - drew its two
+carriageways through each other, with the footway stretched across both as a
+long thin slab. It was not buildable.
+
+**Two separate causes, both in `_pair_demand`.**
+
+First, the trim. `JUNCTION_MAX_TRIM_FACTOR * half_width` has **no angle term**,
+and a shallow merge's demand is all angle: two kerbs 10 degrees apart with 5.5 m
+extents do not separate until ~63 m out. The cap stopped both mouths at ~16 m
+and the arms overlapped for the intervening 46. Worse, the overlap was
+*invisible* to the code - `_exact_apex` only searched the end piece, so the real
+crossing was never found, `ray_ray` supplied a far apex, and `Curve.project`
+clamped it silently back to the end of that piece. D11 warned that `project` is
+not a containment test; this is that warning coming true one layer up.
+
+Second, the corner. `corner_fillet` needs a tangent of `radius * tan(phi / 2)`,
+and at `JUNCTION_CORNER_RADIUS` (6 m) with `phi` near 180 degrees that is ~69 m
+of kerb. The room clamps it, the fitted radius collapses below `MIN_RADIUS`, and
+the fillet returns `None`. So the wedge was a flat cut, and `pavement.py` fell
+back to its straight-quad branch - which is where the slab came from. **The
+fillet maths was never wrong. The radius asked for was.** A real gore nose is a
+tight kerb, and at `GORE_NOSE_RADIUS` the tangent is a few metres and the arc
+survives. The pavement band then follows it concentrically for free, by D12's
+existing guarantee.
+
+**What replaces the cap:** a budget that is the larger of the old width floor
+and `JUNCTION_MAX_TRIM_FRACTION` of *each arm's own length*. Tying it to length
+is what lets a long ramp hold the long gore it genuinely needs - a 10 degree
+merge really is ~70 m of road - while a stub still cannot be eaten by its own
+junction.
+
+**And when even that is not enough, say so.** `Junction.is_degenerate` is the
+alternative to trimming-to-fit-and-overlapping: a pair whose kerbs never
+separate inside either road's budget, or a mouth ring that crosses itself
+(`geometry/polygon.is_simple`, added for this). The junction is outlined in
+`SEGMENT_ERROR` and nothing is derived from it - no fill, no pavement, no stop
+line. Same discipline as `RoadSegment.is_degenerate`: flag it, never raise, and
+never draw it inside out.
+
+**The honest cost:** a shallow merge on short roads is now refused where it used
+to be drawn. It was drawn *wrongly*, so this is the bug becoming visible rather
+than a capability being lost - but it does mean the answer to "why won't my Y
+build" is sometimes "these roads are too short for that angle", and the flag has
+to say so loudly enough to be read that way.
+
+**A test that asserted the bug.**
+`test_exact_trim_follows_a_curved_kerb_instead_of_a_straight_tangent` pinned the
+trim to `JUNCTION_MAX_TRIM_FACTOR * half_width` at `1e-6`. It passed for the
+whole time the overlap existed, because it was asserting the cap rather than the
+geometry. Worth remembering the shape of that: a test written against a
+workaround holds the workaround in place.
+
+---
+
+## D14. A decal is converted to polygons offline, never rasterised at runtime
+
+Turn arrows were hand-built triangles in the renderer - a bend angle per option
+and a wing width - which is a drawing of an arrow rather than the marking a
+driver actually sees.
+
+The markings are now the Hong Kong TPDM shapes, converted **once, offline**
+(`tools/import_markings.py`) into polygon rings in `road/decal_library.py`.
+
+**Against the obvious alternative, loading SVG at runtime:** pygame-ce can do
+it, so this was a real choice. Polygons won on three counts. The game keeps its
+single dependency and never parses SVG. A polygon stays exact at any zoom, where
+a sprite resamples - and "exact at any zoom" is the whole of D7. And rings port
+to a 3D engine as meshes, where a raster decal would have to be re-authored;
+this repo exists to get the model right *before* that port.
+
+**Shapes are normalised, not scaled to metres** - centred, +y along travel,
+exactly 1.0 long - so the real size stays in `config.py` with every other
+tunable (rule 4) instead of being baked in at whatever scale the source sheet
+used. Scaling is uniform: a lane too narrow for an arrow gets a shorter one, not
+a thinner one, because a squashed marking is a different marking.
+
+**The y flip belongs in the importer**, at the edge where foreign data arrives.
+SVG is y-down and the world is y-up (D3), and the camera owns the only other
+flip in the codebase. A second one anywhere near it is how handedness bugs start.
+
+**Licensing is unresolved and recorded as such.** The source repository carries
+no LICENSE and the drawings derive from a government standard. Only the eight
+markings actually used are converted, what ships is a derived outline rather
+than the source file, and `assets/markings/ATTRIBUTION.md` records the origin,
+the commit, and the fact that the codes are unnamed - so the identification is a
+human judgement that can be checked rather than a fact to be trusted.
+
+---
+
+## D15. Paint across a lane transition is geometric, and is not connectivity
+
+Two arms of different profiles already built a junction and already drew a
+transition patch. What they had no answer for was paint: per-segment markings
+stop at each mouth, so a 2-lanes-become-4 came out as bare asphalt.
+
+`road/transition.py` pairs the two cross-sections' markings and carries them
+across. Three things make it work:
+
+- **The anchor is the centre line**, or the datum when there is none. Lining up
+  on zero would be wrong for any widened road; the datum is where a profile
+  says its own centre is (D4).
+- **A centre line goes into both sides' lists**, not neither. That is what makes
+  the case this exists for come out right: a median-split road meeting a
+  paint-split one needs *both* median edges to reach that single line. Keep it
+  out and the median stops in mid-air.
+- **Surplus lines taper to the kerb**, because a road gains a lane against its
+  kerb - which is where that lane has no width yet.
+
+**The flip.** Each mouth's frame keeps its own segment's A -> B tangent, so two
+arms drawn in opposite directions have opposing normals and their `+left`
+offsets mean opposite sides of the same tarmac. One flip, computed once from the
+two normals. The alternative - a sign on every comparison - is the same class of
+mistake D3 exists to prevent.
+
+**What this is not.** The pairing is geometric, for painting only. It carries no
+user intent, nothing is stored, and it says nothing about which lane may feed
+which. That is lane-to-lane connectivity, which D5 reserves for M4/M5 *precisely
+because it does carry intent*. This module answers "where does this line go",
+never "may I drive here", and it must not drift into the second question just
+because it already has a lane correspondence lying around.
+
+---
+
+## D16. Handedness is a lane *order*, not a lane direction
+
+`config.DRIVE_ON_LEFT` has exactly one consumer: `presets.py` reverses each
+preset's lane list.
+
+**The alternative that looks equivalent and is not:** flipping every vehicle
+lane's `direction`. On a two-way street the two are the same picture. On a
+one-way street they are not - flipping directions sends `one_way_two_lane`
+B -> A, reversing a road against the direction it was drawn in rather than
+mirroring it. Which side a travel direction keeps to is a question about
+*order*; reversing the list is the whole answer, and it leaves types, widths and
+the profile's name alone, so `mirrored()`'s name involution still holds.
+
+**`turn_arrows.py` deliberately does not read the flag.** "You turn left from
+the leftmost lane of your own direction group, and right from the rightmost" is
+true under both conventions - what changes is which of those edges is the kerb
+and which is the centreline, and the reversed lane order already says that. The
+first draft threaded the flag through here too; it would have been a second
+source of truth for the same fact.
+
+**Stop lines do not read it either**, for a related reason: which lanes approach
+a mouth is a question about travel direction, not about handedness. Traffic
+reaching end A is the `BACKWARD` group whichever side of the road it keeps to.
+
+**No schema change.** `serialization/schema.py` writes every `LaneSpec` in full,
+so a network keeps the handedness it was built with and an existing save still
+loads correctly after the flag flips.

@@ -8,10 +8,12 @@ behaviourally (draw the same road backwards, get the same junction).
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from roadsim import config
-from roadsim.geometry import ArcSegment, Path, Vec2
+from roadsim.geometry import ArcSegment, Path, Vec2, is_simple
 from roadsim.road.junction import SegmentEnd, build_junction
 from roadsim.road.lane import Direction, LaneSpec, LaneType
 from roadsim.road.network import RoadNetwork
@@ -234,11 +236,14 @@ def test_exact_trim_follows_a_curved_kerb_instead_of_a_straight_tangent(monkeypa
     """The M2 debt this closes: a curve starting right at the node used to
     trim against the straight tangent line it left on, not its own shape.
 
-    A shallow corner is the case that shows it: the straight-tangent version
-    has nowhere real to cross, so it runs into `JUNCTION_MAX_TRIM_FACTOR`'s
-    cap instead of an answer. Bending the same arm's kerb away finds a real,
-    smaller crossing well inside that cap - a different number, not just a
-    smaller share of the same approximation.
+    A shallow corner is the case that shows it. It is also the case that used
+    to be answered by `JUNCTION_MAX_TRIM_FACTOR`'s cap rather than by geometry:
+    the crossing sits tens of metres out, off the end of any one piece, so the
+    search gave up and the cap supplied a number that left the two carriageways
+    overlapping. The kerb is now searched the whole way, so the straight case
+    has a real answer of its own - and it is *further* out than the old cap,
+    which is exactly what the cap was hiding. Bending the same arm's kerb away
+    then moves it again, which is the M2 debt this closes.
 
     `fit_polyline` never puts an arc at a segment's very end - only *between*
     two straights - so the only way to get one there for a test is to replace
@@ -262,9 +267,7 @@ def test_exact_trim_follows_a_curved_kerb_instead_of_a_straight_tangent(monkeypa
         return arm.trim_a
 
     straight_trim = trim_with(None)
-    assert approx(
-        straight_trim, config.JUNCTION_MAX_TRIM_FACTOR * NARROW.half_width, 1e-6
-    )
+    assert straight_trim > config.JUNCTION_MAX_TRIM_FACTOR * NARROW.half_width
 
     entry_dir = tilted.normalized()
     bent = ArcSegment.from_tangent_points(ORIGIN, entry_dir, Vec2(-60.0, 40.0), 20.0)
@@ -359,3 +362,96 @@ def test_pulling_every_arm_out_grows_the_corners_to_match():
 
     after = net.junctions[hub].corners
     assert all(f is not None and approx(f.radius, pulled, 1e-6) for f in after)
+
+
+# -- shallow merges: the gore ----------------------------------------------
+
+
+def merge(angle_deg: float, length: float = 200.0) -> RoadNetwork:
+    """A through road running east-west with a branch leaving at `angle_deg`.
+
+    At a small angle this is a ramp gore: the branch and the eastbound arm run
+    alongside each other for a long way before their kerbs separate at all.
+    """
+    net = RoadNetwork()
+    net.connect(Vec2(-length, 0.0), ORIGIN, NARROW)
+    net.connect(ORIGIN, Vec2(length, 0.0), NARROW)
+    radians = math.radians(angle_deg)
+    net.connect(
+        ORIGIN, Vec2(length * math.cos(radians), length * math.sin(radians)), NARROW
+    )
+    net.rebuild_all()
+    return net
+
+
+def mouths(net: RoadNetwork) -> list[tuple[int, Vec2, float]]:
+    node = net.node_at(ORIGIN)
+    out = []
+    for segment, at_a in net.segments_at(node.id):
+        frame = segment.end_frame(at_a)
+        out.append((segment.id, frame.position, segment.profile.half_width))
+    return out
+
+
+@pytest.mark.parametrize("angle", [10.0, 15.0, 20.0, 30.0, 45.0])
+def test_a_shallow_merge_pulls_back_until_its_arms_actually_clear_each_other(angle):
+    """The invariant the old width-based cap broke.
+
+    Two kerbs at 10 degrees do not separate for tens of metres. Stopping the
+    mouths at three half-widths drew both carriageways through each other; the
+    only honest mouth is one past the point where the kerbs genuinely part.
+    """
+    net = merge(angle)
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    assert not junction.is_degenerate
+    placed = mouths(net)
+    for i, (id_a, pos_a, half_a) in enumerate(placed):
+        for id_b, pos_b, half_b in placed[i + 1 :]:
+            assert pos_a.distance_to(pos_b) >= half_a + half_b - 1e-9, (
+                f"arms {id_a} and {id_b} still overlap at {angle} degrees"
+            )
+
+
+def test_a_shallow_merge_is_given_a_gore_nose_rather_than_a_flat_cut():
+    """`JUNCTION_CORNER_RADIUS` needs a tangent of `radius * tan(phi / 2)` at a
+    near-straight-through corner, which the room clamps until the fitted radius
+    collapses and `corner_fillet` returns `None`. A gore's kerb is tight, and
+    at that radius the arc survives."""
+    net = merge(10.0)
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    noses = [c for c in junction.corners if c is not None]
+    assert noses, "the shallow wedge was left as a flat cut"
+    assert any(approx(c.radius, config.GORE_NOSE_RADIUS, 1e-6) for c in noses)
+
+
+def test_a_road_too_short_to_hold_its_gore_is_flagged_not_overlapped():
+    """A shallow merge is genuinely long. When the roads feeding it cannot give
+    that much, the answer is to say so - not to trim to fit and draw the
+    carriageways through each other."""
+    roomy = merge(10.0, length=200.0)
+    assert not roomy.junctions[roomy.node_at(ORIGIN).id].is_degenerate
+    short = merge(10.0, length=60.0)
+    assert short.junctions[short.node_at(ORIGIN).id].is_degenerate
+
+
+def test_an_ordinary_crossing_keeps_the_default_corner_radius():
+    """The gore radius is for merges only - a right-angle turn is still a turn."""
+    net = crossing()
+    junction = net.junctions[net.node_at(ORIGIN).id]
+    for corner in junction.corners:
+        if corner is not None:
+            assert corner.radius > config.GORE_NOSE_RADIUS
+
+
+def test_a_junction_surface_never_crosses_itself():
+    for angle in (10.0, 20.0, 45.0, 90.0, 135.0):
+        net = merge(angle)
+        junction = net.junctions[net.node_at(ORIGIN).id]
+        if junction.is_degenerate:
+            continue
+        assert is_simple(junction.polygon)
+
+
+def test_an_ordinary_crossing_is_not_flagged():
+    net = crossing()
+    assert not net.junctions[net.node_at(ORIGIN).id].is_degenerate

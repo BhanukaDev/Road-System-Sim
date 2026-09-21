@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from .crosswalk import approach_lanes
 from .profile import RoadProfile
 
 
@@ -23,6 +24,24 @@ class TurnKind(Enum):
     STRAIGHT_LEFT = "straight_left"
     STRAIGHT_RIGHT = "straight_right"
 
+    @property
+    def decal(self) -> str:
+        """The painted shape this option is drawn as (`road/decal.py`).
+
+        A plain mapping rather than a branch in the renderer: adding an option
+        is this line and an import, and no renderer learns its name (rule 2).
+        """
+        return TURN_DECALS[self]
+
+
+TURN_DECALS: dict[TurnKind, str] = {
+    TurnKind.STRAIGHT: "arrow_straight",
+    TurnKind.LEFT: "arrow_left",
+    TurnKind.RIGHT: "arrow_right",
+    TurnKind.STRAIGHT_LEFT: "arrow_straight_left",
+    TurnKind.STRAIGHT_RIGHT: "arrow_straight_right",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class TurnArrow:
@@ -31,6 +50,18 @@ class TurnArrow:
     sign: float
     """+1.0 travels A -> B, -1.0 travels B -> A - which way the decal points."""
     kind: TurnKind
+
+
+def arrows_for_mouth(profile: RoadProfile, at_a: bool) -> tuple[TurnArrow, ...]:
+    """The decals painted at one junction mouth: the approach lanes only.
+
+    A turn decal tells a driver what they may do from the lane they are in, so
+    it belongs on the lanes arriving at this mouth and nowhere else. Painting
+    every lane puts arrows on the carriageway *leaving* the junction too, where
+    they face oncoming drivers who are already past the decision.
+    """
+    approaching = set(approach_lanes(profile, at_a))
+    return tuple(a for a in turn_arrows(profile) if a.lane in approaching)
 
 
 def turn_arrows(profile: RoadProfile) -> tuple[TurnArrow, ...]:

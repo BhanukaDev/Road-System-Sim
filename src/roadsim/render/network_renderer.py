@@ -12,8 +12,6 @@ you zoom in and cheaper as you zoom out (D7).
 
 from __future__ import annotations
 
-import math
-
 import pygame
 
 from .. import config
@@ -21,23 +19,19 @@ from ..geometry import Vec2
 from ..road import RoadNetwork, RoadSegment
 from ..road.cap import Cap, CapKind
 from ..road.crosswalk import CrosswalkMark, crosswalk_mark
+from ..road.decal import get as decal_for
 from ..road.lane import Direction
 from ..road.pavement import build_pavement_bands
-from ..road.turn_arrows import TurnKind, turn_arrows
+from ..road.transition import build_transition
+from ..road.turn_arrows import arrows_for_mouth
 from .camera import Camera
 from .crosswalk_renderer import draw_crosswalk
 from .curves import to_screen_points
+from .decal_renderer import draw_decal
 from .junction_renderer import draw_junction, draw_pavement_band
 from .lane_markings import draw_markings
 from .lane_style import LAYERS, style_for
-
-_TURN_BRANCHES: dict[TurnKind, tuple[float, ...]] = {
-    TurnKind.STRAIGHT: (0.0,),
-    TurnKind.LEFT: (config.TURN_ARROW_BEND_DEG,),
-    TurnKind.RIGHT: (-config.TURN_ARROW_BEND_DEG,),
-    TurnKind.STRAIGHT_LEFT: (0.0, config.TURN_ARROW_BEND_DEG),
-    TurnKind.STRAIGHT_RIGHT: (0.0, -config.TURN_ARROW_BEND_DEG),
-}
+from .transition_renderer import draw_transition
 
 
 class NetworkRenderer:
@@ -65,10 +59,18 @@ class NetworkRenderer:
 
         for junction in network.junctions.values():
             draw_junction(surface, camera, junction)
+            if junction.is_degenerate:
+                # Nothing derived from these mouths is trustworthy - a pavement
+                # band would be stretched across both carriageways, and a stop
+                # line would sit where the kerbs have not separated yet.
+                continue
             ends = network.segments_at(junction.node_id)
             seg_by_key = {(seg.id, at_a): seg for seg, at_a in ends}
             for band in build_pavement_bands(junction, seg_by_key):
                 draw_pavement_band(surface, camera, band)
+            transition = build_transition(junction, seg_by_key)
+            if transition is not None:
+                draw_transition(surface, camera, transition)
             if junction.is_crossing:
                 for segment, at_a in ends:
                     if segment.is_broken:
@@ -203,28 +205,30 @@ class NetworkRenderer:
         at_a: bool,
         mark: CrosswalkMark,
     ) -> None:
-        """One decal per lane, upstream of the stop line - `turn_arrows` says
-        which shape. A single option is one `_draw_arrow`; two share a base so
-        they read as one arrow forking, not two arrows fighting for the spot."""
+        """One decal per approaching lane, upstream of the stop line.
+
+        `arrows_for_mouth` says which lanes and which option; the shape itself
+        is the TPDM marking off `road/decal.py`, scaled down where a narrow
+        lane cannot hold it at full size.
+        """
         away = 1.0 if at_a else -1.0
         s = segment.path.clamp_s(mark.stop_s + away * config.TURN_ARROW_SETBACK)
         frame = segment.path.sample(s)
         profile = segment.profile
-        length = config.TURN_ARROW_LENGTH
-        for arrow in turn_arrows(profile):
-            branches = _TURN_BRANCHES[arrow.kind]
-            center = frame.position + frame.normal * profile.lane_center(arrow.lane)
-            direction = frame.tangent * arrow.sign
+        for arrow in arrows_for_mouth(profile, at_a):
+            decal = decal_for(arrow.kind.decal)
             lane_width = profile.lanes[arrow.lane].width
-            if len(branches) == 1:
-                self._draw_arrow(
-                    surface, camera, center, direction, length / 2.0, lane_width
-                )
-                continue
-            base = center - direction * (length / 2.0)
-            for degrees in branches:
-                bend = direction.rotated(math.radians(degrees))
-                self._draw_arrow_branch(surface, camera, base, bend, length, lane_width)
+            length = decal.fitted_length(
+                config.TURN_ARROW_LENGTH, lane_width * config.TURN_ARROW_LANE_FRACTION
+            )
+            draw_decal(
+                surface,
+                camera,
+                decal,
+                frame.position + frame.normal * profile.lane_center(arrow.lane),
+                frame.tangent * arrow.sign,
+                length,
+            )
 
     def _draw_error(
         self, surface: pygame.Surface, camera: Camera, segment: RoadSegment

@@ -70,6 +70,24 @@ def build_demo_network() -> RoadNetwork:
     # A narrow alley - the other end of the width range from the avenue above.
     net.connect(Vec2(-160.0, -30.0), Vec2(-110.0, -55.0), ALLEY)
 
+    # A shallow merge - a ramp gore. This is the case the old width-based trim
+    # cap could not do: two kerbs 12 degrees apart do not separate for tens of
+    # metres, so stopping the mouths at three half-widths drew both
+    # carriageways through each other and stretched the footway over the pair.
+    # Long arms on purpose - a gore needs the room, and a road too short to
+    # hold one is flagged rather than overlapped.
+    gore = Vec2(180.0, -260.0)
+    net.connect(Vec2(-60.0, -260.0), gore, RESIDENTIAL_TWO_WAY)
+    net.connect(gore, Vec2(400.0, -260.0), RESIDENTIAL_TWO_WAY)
+    net.connect(gore, Vec2(395.0, -215.0), RESIDENTIAL_TWO_WAY)
+
+    # A lane-count transition: four lanes becoming two. The patch between the
+    # mouths carries the centre line, the median's two edges folding back onto
+    # it, the tapering lane dividers and a merge arrow.
+    taper = Vec2(-230.0, -190.0)
+    net.connect(Vec2(-330.0, -190.0), taper, AVENUE_FOUR_LANE)
+    net.connect(taper, Vec2(-130.0, -190.0), RESIDENTIAL_TWO_WAY)
+
     net.rebuild_all()
     return net
 
