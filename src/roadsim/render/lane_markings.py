@@ -34,7 +34,15 @@ def draw_markings(
     profile: RoadProfile,
     s0: float,
     s1: float,
+    narrowed: dict[float, tuple[float, float]] | None = None,
 ) -> None:
+    """`narrowed` shortens *one* marking's own span, keyed by its offset.
+
+    A median taper (`road/median_taper.py`) narrows the lane's own edges short
+    of the mouth, and paints its own converging line over that stretch - so
+    the plain straight edge line this function would otherwise draw the whole
+    way to the mouth has to stop where the taper starts, or the two lines run
+    on top of each other."""
     if s1 - s0 < 1e-6 or (s1 - s0) * camera.zoom < config.MARKING_MIN_PX:
         return
     tolerance = camera.world_tolerance
@@ -42,8 +50,12 @@ def draw_markings(
     for marking in lane_markings(profile):
         color = MARKING_COLOR[marking.kind]
         left, right = marking.offset + half_width, marking.offset - half_width
+        span = (narrowed or {}).get(round(marking.offset, 9), (s0, s1))
+        m_s0, m_s1 = span
+        if m_s1 - m_s0 < 1e-6:
+            continue
         if marking.kind.is_dashed:
-            for dash_s0, dash_s1 in dash_intervals(s0, s1):
+            for dash_s0, dash_s1 in dash_intervals(m_s0, m_s1):
                 _draw_band(
                     surface,
                     camera,
@@ -56,7 +68,7 @@ def draw_markings(
                     color,
                 )
         else:
-            _draw_band(surface, camera, path, tolerance, left, right, s0, s1, color)
+            _draw_band(surface, camera, path, tolerance, left, right, m_s0, m_s1, color)
 
 
 def _draw_band(

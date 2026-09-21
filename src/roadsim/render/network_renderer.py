@@ -21,7 +21,8 @@ from ..road.cap import Cap, CapKind
 from ..road.crosswalk import CrosswalkMark, crosswalk_mark
 from ..road.decal import get as decal_for
 from ..road.junction import Junction
-from ..road.lane import Direction
+from ..road.lane import Direction, LaneType
+from ..road.median_taper import MedianTaper, median_tapers
 from ..road.pavement import build_pavement_bands
 from ..road.transition import build_transition
 from ..road.turn_arrows import arrows_for_mouth
@@ -32,6 +33,7 @@ from .decal_renderer import draw_decal
 from .junction_renderer import draw_junction, draw_pavement_band
 from .lane_markings import draw_markings
 from .lane_style import LAYERS, style_for
+from .median_taper_renderer import draw_median_taper
 from .transition_renderer import draw_transition
 
 
@@ -46,10 +48,18 @@ class NetworkRenderer:
         self, surface: pygame.Surface, camera: Camera, network: RoadNetwork
     ) -> None:
         drawable = [s for s in network.segments.values() if not s.is_broken]
+        tapers = {
+            segment.id: median_tapers(
+                segment,
+                network.junctions.get(segment.node_a),
+                network.junctions.get(segment.node_b),
+            )
+            for segment in drawable
+        }
 
         for layer in LAYERS:
             for segment in drawable:
-                self._draw_lanes(surface, camera, segment, layer)
+                self._draw_lanes(surface, camera, segment, layer, tapers[segment.id])
 
         for segment in drawable:
             draw_markings(
@@ -59,7 +69,10 @@ class NetworkRenderer:
                 segment.profile,
                 segment.trim_a,
                 segment.path.length - segment.trim_b,
+                _median_marking_overrides(segment, tapers[segment.id]),
             )
+            for taper in tapers[segment.id]:
+                draw_median_taper(surface, camera, taper)
 
         for junction in network.junctions.values():
             draw_junction(surface, camera, junction)
@@ -106,14 +119,28 @@ class NetworkRenderer:
         camera: Camera,
         segment: RoadSegment,
         layer: int,
+        tapers: tuple[MedianTaper, ...],
     ) -> None:
         tolerance = camera.world_tolerance
         for k, lane in enumerate(segment.profile.lanes):
             style = style_for(lane.type)
             if style.layer != layer:
                 continue
+            s0, s1 = segment.trim_a, segment.path.length - segment.trim_b
+            if lane.type is LaneType.MEDIAN:
+                # A taper replaces the constant-width ribbon for the last
+                # stretch before its mouth with the narrowing island
+                # `draw_median_taper` paints instead, so the plain ribbon must
+                # stop where that island starts rather than running under it.
+                for taper in tapers:
+                    if taper.lane_index != k:
+                        continue
+                    if taper.at_a:
+                        s0 = max(s0, taper.full_s)
+                    else:
+                        s1 = min(s1, taper.full_s)
             outline = to_screen_points(
-                camera, segment.lane_ribbon(k, tolerance).outline
+                camera, segment.lane_ribbon(k, tolerance, s0, s1).outline
             )
             if len(outline) < 3:
                 continue
@@ -245,6 +272,28 @@ class NetworkRenderer:
         points = to_screen_points(camera, segment.path.points(camera.world_tolerance))
         if len(points) >= 2:
             pygame.draw.lines(surface, config.Color.SEGMENT_ERROR, False, points, 3)
+
+
+def _median_marking_overrides(
+    segment: RoadSegment, tapers: tuple[MedianTaper, ...]
+) -> dict[float, tuple[float, float]] | None:
+    """The span each of a tapering median's own edge lines gets, keyed by its
+    offset - the same `full_s` cutoff `_draw_lanes` gives that lane's ribbon,
+    so the straight line and the narrowing island stop at the same point."""
+    if not tapers:
+        return None
+    default = (segment.trim_a, segment.path.length - segment.trim_b)
+    overrides: dict[float, tuple[float, float]] = {}
+    for taper in tapers:
+        for offset in segment.profile.lane_bounds(taper.lane_index):
+            key = round(offset, 9)
+            s0, s1 = overrides.get(key, default)
+            if taper.at_a:
+                s0 = max(s0, taper.full_s)
+            else:
+                s1 = min(s1, taper.full_s)
+            overrides[key] = (s0, s1)
+    return overrides
 
 
 def _arrow_signs(direction: Direction) -> tuple[float, ...]:

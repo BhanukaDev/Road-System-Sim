@@ -167,11 +167,20 @@ class RoadSegment:
             raise ValueError(f"segment {self.id} is too short to have a carriageway")
         return self.path.shortened(self.trim_a, self.trim_b)
 
-    def lane_ribbon(self, k: int, tolerance: float) -> Ribbon:
+    def lane_ribbon(
+        self,
+        k: int,
+        tolerance: float,
+        s0: float | None = None,
+        s1: float | None = None,
+    ) -> Ribbon:
         """Lane `k` as a ribbon, exact to `profile.lane_bounds(k)`.
 
         Built by offsetting, never by resampling the centreline - so a lane edge
-        stays exactly its offset from the centreline at any zoom.
+        stays exactly its offset from the centreline at any zoom. Defaults to
+        the carriageway span; `s0`/`s1` narrow that further, which is what a
+        median taper needs to stop its constant-width ribbon short of the mouth
+        (`road/median_taper.py`) without touching every other lane's call.
         """
         left, right = self.profile.lane_bounds(k)
         return build_ribbon(
@@ -179,8 +188,8 @@ class RoadSegment:
             left,
             right,
             tolerance,
-            s0=self.trim_a,
-            s1=self.path.length - self.trim_b,
+            s0=self.trim_a if s0 is None else s0,
+            s1=(self.path.length - self.trim_b) if s1 is None else s1,
         )
 
     def lane_centerline(self, k: int) -> Path:

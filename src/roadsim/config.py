@@ -77,6 +77,25 @@ JUNCTION_CORNER_RADIUS = 6.0
 """Metres. Default fillet radius rounding a junction corner, before a user's
 corner-handle pull or the room either arm has to give clamps it down."""
 
+MEDIAN_TAPER_LENGTH = 8.0
+"""Metres a median lane narrows over, approaching a real crossing (3+ arms).
+
+A median stopping dead at the mouth reads as a slab shoved up against the
+intersection with no transition - and a crossing has already eaten the room a
+full-width median would need there anyway. Shortened by `fitted_length` when
+`MEDIAN_NOSE_WIDTH` leaves less than a lane's width to give up (a narrow median
+tapering fully in a couple of metres), and again by
+`MEDIAN_TAPER_MAX_FRACTION` on a short carriageway."""
+
+MEDIAN_NOSE_WIDTH = 0.6
+"""Metres. A median lane's width right at a crossing's mouth once it has
+narrowed - a small physical island, not the lane's configured width."""
+
+MEDIAN_TAPER_MAX_FRACTION = 0.4
+"""An arm too short to give `MEDIAN_TAPER_LENGTH` still cannot lose more than
+this fraction of its own carriageway to the taper - the same reasoning as
+`JUNCTION_MAX_TRIM_FRACTION`, one size down."""
+
 MIN_CARRIAGEWAY = 1.0
 """Metres. Below this a segment is all junction and has no road left; it is
 flagged `is_too_short` and drawn as an error rather than trimmed to nothing."""
