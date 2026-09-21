@@ -143,14 +143,41 @@ def test_a_refused_road_changes_nothing(ctx):
 
 def test_preview_reports_the_real_road_length(ctx):
     tool = DrawRoadTool()
-    tool.points = [Vec2(-20.0, 0.0)]
-    ctx.cursor = Vec2(20.0, 0.0)
+    tool.points = [Vec2(-20.0, 50.0)]
+    ctx.cursor = Vec2(20.0, 50.0)
     preview = tool.preview(ctx)
 
     assert len(preview.paths) == 1
     assert preview.profile is ctx.profile
     assert preview.measurement is not None
     assert approx(preview.measurement, 40.0)
+    assert preview.angles == []  # neither end touches existing geometry
+
+
+def test_preview_shows_the_angle_where_a_new_road_meets_an_existing_one(ctx):
+    """Perpendicular off an existing road reads as 90, not some map bearing."""
+    node = ctx.network.node_at(Vec2(-60.0, 0.0))
+    tool = DrawRoadTool()
+    tool.points = [node.position]
+    tool.start_snap = Snap(SnapKind.NODE, node.position, node.id)
+    ctx.cursor = Vec2(-60.0, 40.0)
+
+    preview = tool.preview(ctx)
+
+    assert len(preview.angles) == 1
+    assert_vec(preview.angles[0].position, node.position)
+    assert approx(preview.angles[0].degrees, 90.0)
+
+
+def test_preview_shows_the_turn_angle_at_each_interior_corner(ctx):
+    tool = DrawRoadTool()
+    tool.points = [Vec2(0.0, 50.0), Vec2(40.0, 50.0)]
+    ctx.cursor = Vec2(40.0, 90.0)  # a right-angle turn at the second point
+
+    preview = tool.preview(ctx)
+
+    corner = next(a for a in preview.angles if a.position == Vec2(40.0, 50.0))
+    assert approx(corner.degrees, 90.0)
 
 
 # -- moving ---------------------------------------------------------------

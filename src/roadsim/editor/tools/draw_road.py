@@ -11,10 +11,13 @@ a T-junction is one action and one undo.
 
 from __future__ import annotations
 
+import math
+
 import pygame
 
 from ... import config
 from ...geometry import Path, Vec2, fit_freehand, fit_polyline
+from ...road.network import RoadNetwork
 from ..commands import (
     AddSegment,
     Command,
@@ -23,7 +26,7 @@ from ..commands import (
     NodeSlot,
     SplitSegment,
 )
-from ..context import EditorContext, ToolPreview
+from ..context import AngleReadout, EditorContext, ToolPreview
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
 
@@ -180,8 +183,11 @@ class DrawRoadTool(Tool):
                 path = fit(list(points), config.DEFAULT_CORNER_RADIUS)
                 preview.paths.append(path)
                 preview.measurement = path.length
-                if len(points) >= 3:
-                    preview.angle = (path.end.position - path.start.position).angle
+                if not self._dragging:
+                    preview.angles.extend(_corner_angles(points))
+                preview.angles.extend(
+                    _connection_angles(ctx.network, path, self.start_snap, preview.snap)
+                )
             except ValueError:
                 pass  # not yet two distinct points; nothing to show
         return preview
@@ -306,3 +312,77 @@ def _corner_points(path: Path, start: Vec2, end: Vec2) -> list[Vec2]:
 
 def _pixels_from(a: tuple[int, int], b: tuple[int, int]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+# -- angle readouts ----------------------------------------------------------
+
+
+def _angle_between(a: Vec2, b: Vec2) -> float:
+    """Unsigned angle between two directions, degrees in [0, 180]."""
+    cos = max(-1.0, min(1.0, a.normalized().dot(b.normalized())))
+    return math.degrees(math.acos(cos))
+
+
+def _arms_at_snap(network: RoadNetwork, snap: Snap) -> list[Vec2]:
+    """Directions the existing road(s) at a snap point head away from it.
+
+    A node may carry several arms (an existing junction); a mid-segment snap
+    has exactly two, one each way along that one road.
+    """
+    if snap.kind is SnapKind.NODE:
+        node = network.nodes.get(snap.node_id)
+        if node is None:
+            return []
+        arms = []
+        for segment_id in node.segments:
+            segment = network.segments.get(segment_id)
+            if segment is not None:
+                arms.append(segment.outgoing_dir(segment.is_at_a(node.id)))
+        return arms
+    if snap.kind is SnapKind.SEGMENT:
+        segment_id, s = snap.segment_hit
+        segment = network.segments.get(segment_id)
+        if segment is None:
+            return []
+        tangent = segment.path.sample(s).tangent
+        return [tangent, -tangent]
+    return []
+
+
+def _connection_angle(new_dir: Vec2, arms: list[Vec2]) -> float | None:
+    """How far the new road deviates from continuing straight along the
+    nearest existing arm - 0 merges smoothly, 90 is a perpendicular T."""
+    if not arms or new_dir.length_sq < 1e-12:
+        return None
+    return min(_angle_between(new_dir, arm) for arm in arms)
+
+
+def _connection_angles(
+    network: RoadNetwork, path: Path, start: Snap | None, end: Snap | None
+) -> list[AngleReadout]:
+    """Angle readouts where the previewed road meets existing geometry.
+
+    A free (grid/angle-constrained) end is not a connection, so it gets none.
+    """
+    out: list[AngleReadout] = []
+    if start is not None and not start.is_free:
+        angle = _connection_angle(path.start.tangent, _arms_at_snap(network, start))
+        if angle is not None:
+            out.append(AngleReadout(path.start.position, angle))
+    if end is not None and not end.is_free:
+        angle = _connection_angle(-path.end.tangent, _arms_at_snap(network, end))
+        if angle is not None:
+            out.append(AngleReadout(path.end.position, angle))
+    return out
+
+
+def _corner_angles(points: list[Vec2]) -> list[AngleReadout]:
+    """Turn angle at each interior corner of a clicked (not freehand) road."""
+    out = []
+    for i in range(1, len(points) - 1):
+        incoming = points[i] - points[i - 1]
+        outgoing = points[i + 1] - points[i]
+        if incoming.length_sq < 1e-9 or outgoing.length_sq < 1e-9:
+            continue
+        out.append(AngleReadout(points[i], _angle_between(incoming, outgoing)))
+    return out

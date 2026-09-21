@@ -104,10 +104,12 @@ class EditorOverlay:
     ) -> None:
         color = config.Color.SEGMENT_ERROR if preview.invalid else config.Color.PREVIEW
 
-        if preview.profile is not None and not preview.invalid:
+        if preview.profile is not None:
             for layer in LAYERS:
                 for path in preview.paths:
-                    self._draw_preview_lanes(surface, camera, path, preview.profile, layer)
+                    self._draw_preview_lanes(
+                        surface, camera, path, preview.profile, layer, preview.invalid
+                    )
 
         for path in preview.paths:
             points = to_screen_points(camera, path.points(camera.world_tolerance))
@@ -138,10 +140,21 @@ class EditorOverlay:
             )
             surface.blit(label, (x + 8, y - 8))
 
+        for readout in preview.angles:
+            x, y = camera.to_screen(readout.position)
+            label = pygame.font.SysFont("consolas,menlo,monospace", 12).render(
+                f"{readout.degrees:.0f} deg",
+                True,
+                config.Color.HUD_TEXT,
+            )
+            surface.blit(label, (x + 8, y + 8))
+
         if preview.snap is not None:
             self._draw_snap(surface, camera, preview.snap)
 
-    def _draw_preview_lanes(self, surface, camera, path, profile, layer) -> None:
+    def _draw_preview_lanes(
+        self, surface, camera, path, profile, layer, invalid=False
+    ) -> None:
         for index, lane in enumerate(profile.lanes):
             style = style_for(lane.type)
             if style.layer != layer:
@@ -154,9 +167,11 @@ class EditorOverlay:
             outline = to_screen_points(camera, ribbon.outline)
             if len(outline) < 3:
                 continue
-            pygame.draw.polygon(surface, style.fill, outline)
-            if style.edge is not None:
-                pygame.draw.polygon(surface, style.edge, outline, 1)
+            fill = config.Color.SEGMENT_ERROR if invalid else style.fill
+            edge = config.Color.SEGMENT_ERROR if invalid else style.edge
+            pygame.draw.polygon(surface, fill, outline)
+            if edge is not None:
+                pygame.draw.polygon(surface, edge, outline, 1)
 
     def _draw_snap(self, surface: pygame.Surface, camera: Camera, snap: Snap) -> None:
         """Each snap kind gets its own mark, so what the editor is about to do

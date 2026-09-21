@@ -45,6 +45,22 @@ class Selection:
 EMPTY = Selection()
 
 
+@dataclass(frozen=True, slots=True)
+class AngleReadout:
+    """One angle worth calling out - how far a road deviates from continuing
+    straight, at a specific point.
+
+    That single framing covers both places it comes up: a new road merging
+    into an existing one (0 = merges smoothly, 90 = a perpendicular T), and a
+    corner in a road still being drawn (0 = no turn at all). A preview can
+    carry more than one - a start connection, an end connection and every
+    corner in between are each their own readout at their own position.
+    """
+
+    position: Vec2
+    degrees: float
+
+
 @dataclass
 class ToolPreview:
     """A tool's work in progress, as geometry rather than as drawing calls."""
@@ -57,7 +73,7 @@ class ToolPreview:
     invalid: bool = False
     """The preview cannot be committed as it stands - drawn as a warning."""
     measurement: float | None = None
-    angle: float | None = None
+    angles: list[AngleReadout] = field(default_factory=list)
     profile: RoadProfile | None = None
     """Cross-section to use when drawing the preview roads."""
 
@@ -69,7 +85,7 @@ class ToolPreview:
             or self.rubber_band
             or self.snap
             or self.measurement is not None
-            or self.angle is not None
+            or self.angles
         )
 
 
