@@ -52,6 +52,9 @@ DIRECTION_ARROW_LENGTH = 3.0
 DIRECTION_ARROW_MIN_PX = 26.0
 """Below this on-screen lane length, arrows are skipped rather than crammed."""
 
+STOP_LINE_WIDTH_PX = 3.0
+"""Thickness of a terminal cap's stop line, in screen pixels."""
+
 PAN_KEY_SPEED_PX = 900.0
 """Keyboard and screen-edge pan speed, in *pixels* per second, converted to
 metres through `camera.zoom`. Pixels rather than metres for the same reason snap
@@ -125,6 +128,9 @@ class Color:
 
     JUNCTION_FILL = (52, 55, 62)
     JUNCTION_EDGE = (44, 46, 52)
+    CAP_FILL = (52, 55, 62)
+    CAP_EDGE = (44, 46, 52)
+    STOP_LINE = (226, 226, 230)
     DIRECTION_ARROW = (150, 156, 168)
     SEGMENT_ERROR = (198, 72, 64)
     NODE_MARK = (226, 168, 72)

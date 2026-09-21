@@ -92,10 +92,16 @@ Each step leaves the app runnable and the suite green.
 4. **Previews that show the real road.** `ToolPreview` grows ghosts, guides,
    measurements, highlights, anchors and a rejection reason; `road/cap.py`;
    `road/anchor.py`; `editor/guides/`; the overlay and snapper `if`-chains become
-   registries. The current slice adds `editor/guides.py`: horizontal, vertical
+   registries. The previous slice added `editor/guides.py`: horizontal, vertical
    and road-extension alignment guides drawn dashed in the overlay while
    drawing, plus a rejection reason carried on `ToolPreview` itself (not just
-   `ctx.status`) so a blocked road shows why, next to where it was refused.
+   `ctx.status`) so a blocked road shows why, next to where it was refused. The
+   current slice adds `road/cap.py` (item 8): a dead end derives a `Cap` from its
+   one segment end, rebuilt alongside junctions whenever its node is dirty. A
+   two-way road gets a **turning head** - a semicircular bulge tangent to both
+   edges, exactly as wide as the road and no wider, so no trim or width change is
+   needed - a one-way road gets a **terminal**, just a stop line. Squared-off dead
+   ends are gone from `render/network_renderer.py`.
 5. **Tool modes, loops, bulldoze, replace.** `editor/shapers/`;
    `editor/road_build.py`; `editor/impact.py`; the bulldoze and replace tools.
 6. **Levels, colliders, crossings.** `level` and the corner pulls stored together

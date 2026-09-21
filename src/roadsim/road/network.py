@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from itertools import count
 
 from ..geometry import Vec2
+from .cap import Cap, build_cap
 from .junction import Junction, build_junction
 from .node import RoadNode
 from .profile import RoadProfile
@@ -29,6 +30,8 @@ class RoadNetwork:
     segments: dict[int, RoadSegment] = field(default_factory=dict)
     junctions: dict[int, Junction] = field(default_factory=dict)
     """Keyed by node id. Derived - never saved, never trusted across a rebuild."""
+    caps: dict[int, Cap] = field(default_factory=dict)
+    """Keyed by node id. Derived, like `junctions` - one entry per dead end."""
 
     _node_ids: count = field(default_factory=lambda: count(1), repr=False)
     _segment_ids: count = field(default_factory=lambda: count(1), repr=False)
@@ -98,6 +101,7 @@ class RoadNetwork:
             self.remove_segment(segment_id)
         del self.nodes[node_id]
         self.junctions.pop(node_id, None)
+        self.caps.pop(node_id, None)
         self._dirty.discard(node_id)
 
     def move_node(self, node_id: int, position: Vec2) -> None:
@@ -184,13 +188,20 @@ class RoadNetwork:
         for node_id in dirty:
             if node_id not in self.nodes:
                 self.junctions.pop(node_id, None)
+                self.caps.pop(node_id, None)
                 continue
             ends = self.segments_at(node_id)
-            junction = build_junction(node_id, self.nodes[node_id].position, ends)
-            if junction is None:
+            if len(ends) == 1:
+                segment, at_a = ends[0]
+                self.caps[node_id] = build_cap(segment, at_a)
                 self.junctions.pop(node_id, None)
             else:
-                self.junctions[node_id] = junction
+                self.caps.pop(node_id, None)
+                junction = build_junction(node_id, self.nodes[node_id].position, ends)
+                if junction is None:
+                    self.junctions.pop(node_id, None)
+                else:
+                    self.junctions[node_id] = junction
             touched.update(segment.id for segment, _ in ends)
         for segment_id in touched:
             self._retrim(self.segments[segment_id])

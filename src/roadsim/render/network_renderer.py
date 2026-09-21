@@ -16,6 +16,7 @@ import pygame
 from .. import config
 from ..geometry import Vec2
 from ..road import RoadNetwork, RoadSegment
+from ..road.cap import Cap, CapKind
 from ..road.lane import Direction
 from .camera import Camera
 from .curves import to_screen_points
@@ -37,6 +38,9 @@ class NetworkRenderer:
 
         for junction in network.junctions.values():
             self._draw_polygon(surface, camera, junction.polygon)
+
+        for cap in network.caps.values():
+            self._draw_cap(surface, camera, cap)
 
         if self.show_arrows:
             for segment in drawable:
@@ -77,6 +81,27 @@ class NetworkRenderer:
         points = to_screen_points(camera, list(polygon))
         pygame.draw.polygon(surface, config.Color.JUNCTION_FILL, points)
         pygame.draw.polygon(surface, config.Color.JUNCTION_EDGE, points, 1)
+
+    def _draw_cap(self, surface: pygame.Surface, camera: Camera, cap: Cap) -> None:
+        if cap.kind is CapKind.TERMINAL:
+            points = to_screen_points(camera, [cap.left, cap.right])
+            pygame.draw.lines(
+                surface,
+                config.Color.STOP_LINE,
+                False,
+                points,
+                max(1, round(config.STOP_LINE_WIDTH_PX)),
+            )
+            return
+        bulge = cap.bulge
+        arc_points = [
+            bulge.sample(s).position for s in bulge.flatten(camera.world_tolerance)
+        ]
+        points = to_screen_points(camera, [cap.left, *arc_points, cap.right])
+        if len(points) < 3:
+            return
+        pygame.draw.polygon(surface, config.Color.CAP_FILL, points)
+        pygame.draw.polygon(surface, config.Color.CAP_EDGE, points, 1)
 
     def _draw_arrows(
         self, surface: pygame.Surface, camera: Camera, segment: RoadSegment
