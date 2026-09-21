@@ -459,3 +459,69 @@ reaching end A is the `BACKWARD` group whichever side of the road it keeps to.
 **No schema change.** `serialization/schema.py` writes every `LaneSpec` in full,
 so a network keeps the handedness it was built with and an existing save still
 loads correctly after the flag flips.
+
+## D17. A junction kerb is a blend between the mouths, not a fillet at their apex
+
+**The symptom:** two roads meeting at an angle - one road bending, or changing
+cross-section, at a two-arm node - drew a grey triangular wedge across the bend
+with the footway stopping dead on either side of it. A gore nose by any other
+name, except with straight edges and a hole where the pavement should be.
+
+**Why the corner fillet was not the kerb.** `_pair_demand` solves a fillet at
+the *apex* where the two kerbs cross, and the trim is then `reach + tangent`, so
+the mouth lands exactly where that arc leaves the kerb. That invariant is real,
+but it is conditional, and three things break it:
+
+* the half-width floor - `max(reach + tangent, half_width)` - which wins
+  whenever the arms are wide relative to how far apart their kerbs cross;
+* `_trim_budget`, which clamps `reach` on a short arm;
+* an arm still curving at its mouth, whose frame has turned away from the
+  tangent ray the apex was found on.
+
+In every one of those the mouth moves and the fillet does not follow. The arc
+then floats somewhere inside the junction and `_rounded_outline` falls back to a
+chord between the mouths - the triangle - while `build_pavement_bands` lays a
+footway along an arc that no longer touches either road. **Nothing in the fillet
+maths was wrong. It was answering a different question from the one being
+drawn.**
+
+**The two questions, separated.** The fillet stays exactly where it was and
+keeps its job: its tangent length is a *budget*, the thing that tells each mouth
+how far to pull back. What gets drawn is now a separate `Junction.blends` entry
+per corner - a biarc from one mouth's kerb corner to the next, taking each end's
+own mouth frame as its heading.
+
+**Why a biarc.** The two endpoints and both directions are all fixed before the
+kerb is built, and no single arc passes through two points with two prescribed
+tangents. Two tangent arcs are the minimum that can, which makes this the
+standard construction rather than a taste in curves - and they are arcs, so D1's
+exact offset still holds and the pavement band is `blend.offset(width)` with no
+resampling. The equal-chord variant shares the turning between the two arcs,
+which is what gives a shallow merge the symmetric nose a real gore has instead
+of one arc doing all the work.
+
+**Curvature now comes from the orientations, not from a constant.** How far the
+kerb bows is set by how far apart the two mouths are and how much their headings
+disagree. A right-angle corner gets a quarter turn; two arms 10 degrees apart
+get a long shallow nose; two profiles meeting head on get an S-bend stepping the
+footway across the width change, where the old code cut a diagonal.
+
+**A two-arm node is not a crossing, and is no longer coloured as one.**
+`Junction.is_crossing` already knew the difference and only the crosswalk code
+read it. The surface now takes `Color.JOINT_FILL` - the carriageway colour -
+below three arms, because a road bending is road, not an intersection. That is
+the whole of the fix for "it looks like a grey slab laid over my road".
+
+**What this does not yet do:** the joint patch is filled as one slab of
+carriageway, so a parking lane, median or bus lane running into it stops at the
+mouth rather than continuing through. Continuing them needs lane-to-lane
+correspondence across two profiles, which is `road/transition.py`'s problem and
+is still only solved for paint.
+
+**The tests changed shape, not strength.** `tests/test_pavement.py` asserted
+concentricity - one centre, two radii - which is a property of the *fillet*, not
+of a kerb. A biarc has no single centre, so the invariant is now stated as the
+thing a pedestrian would notice: `inner` is exactly one sidewalk width from the
+kerb at every point along it, measured by projecting back onto the kerb rather
+than by arc-length fraction (offsetting an arc changes its length, so equal
+fractions are not equal points).

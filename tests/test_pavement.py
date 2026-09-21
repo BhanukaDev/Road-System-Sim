@@ -1,11 +1,14 @@
-"""Pavement bands round a rounded junction corner.
+"""Pavement bands round a junction corner.
 
-The one invariant that matters is concentricity: `curb` and `inner` share a
-centre and are exactly one sidewalk width apart at every sampled angle, not
-just at their tangent points. Which side `inner` sits on matters just as much -
-a corner arc curves around a centre out in the empty corner, so the edge facing
-the carriageway is the *larger* radius, and getting that backwards throws the
-footway off into the block.
+The one invariant that matters is constant width: `inner` is exactly one
+sidewalk width from `curb` at every point along it, not just at the ends. Which
+side `inner` sits on matters just as much - the mouths are walked
+counter-clockwise, so the carriageway is on the kerb's left the whole way round,
+and getting that backwards throws the footway off into the block.
+
+Stated as a distance rather than as "two arcs sharing a centre" on purpose. The
+kerb across a corner is a biarc, so there is no single centre to share, and the
+width is the thing a pedestrian would actually notice.
 """
 
 from __future__ import annotations
@@ -19,7 +22,23 @@ from roadsim.road.presets import (
     RESIDENTIAL_TWO_WAY,
 )
 
-from .conftest import approx, assert_vec
+from .conftest import assert_vec
+
+
+def assert_band_width(band, width: float) -> None:
+    """`inner` is `width` to the kerb's left, everywhere along it.
+
+    Matched by projecting back onto the kerb rather than by arc-length fraction:
+    offsetting an arc changes its length, so the same fraction along a biarc and
+    its offset are not the same point.
+    """
+    assert band.curb is not None
+    assert band.inner is not None
+    for s in band.inner.flatten(1e-3):
+        point = band.inner.sample(s).position
+        frame = band.curb.sample(band.curb.project(point))
+        assert_vec(point, frame.position + frame.normal * width)
+
 
 ORIGIN = Vec2(0.0, 0.0)
 NARROW = RESIDENTIAL_TWO_WAY
@@ -35,7 +54,7 @@ def crossing(east_west=NARROW, north_south=NARROW) -> RoadNetwork:
     return net
 
 
-def test_a_pavement_band_is_concentric_with_its_corner():
+def test_a_pavement_band_keeps_its_width_the_whole_way_round():
     net = crossing()
     hub = net.node_at(ORIGIN).id
     junction = net.junctions[hub]
@@ -45,18 +64,15 @@ def test_a_pavement_band_is_concentric_with_its_corner():
 
     width = NARROW.lanes[0].width
     for band in bands:
-        assert band.curb is not None
-        assert band.inner is not None
-        assert_vec(band.curb.center, band.inner.center)
-        assert approx(band.inner.radius - band.curb.radius, width, 1e-6)
-        assert band.inner.center.distance_to(ORIGIN) > band.curb.radius
+        assert_band_width(band, width)
         next_corner = 2 * ((band.corner_index + 1) % len(junction.ends))
         assert_vec(band.outer_start, junction.polygon[2 * band.corner_index + 1])
         assert_vec(band.outer_end, junction.polygon[next_corner])
-        for t in (0.0, 0.3, 0.7, 1.0):
-            inner_point = band.curb.sample(t * band.curb.length).position
-            outer_point = band.inner.sample(t * band.inner.length).position
-            assert approx(inner_point.distance_to(outer_point), width, 1e-6)
+        # The kerb starts and ends on the mouths themselves - not short of them,
+        # which is what let a corner solved at the kerbs' apex float free of the
+        # road it was meant to join.
+        assert_vec(band.curb.start.position, band.outer_start)
+        assert_vec(band.curb.end.position, band.outer_end)
 
 
 def test_no_sidewalk_means_no_pavement_band():
@@ -67,7 +83,7 @@ def test_no_sidewalk_means_no_pavement_band():
     assert build_pavement_bands(junction, seg_by_key) == ()
 
 
-def test_straight_profile_change_connects_both_sidewalks():
+def test_straight_profile_change_bends_the_kerb_across_instead_of_cutting_it():
     net = RoadNetwork()
     net.connect(Vec2(-70.0, 0.0), ORIGIN, RESIDENTIAL_TWO_WAY)
     changed = net.connect(ORIGIN, Vec2(70.0, 0.0), RESIDENTIAL_TWO_WAY)
@@ -83,11 +99,18 @@ def test_straight_profile_change_connects_both_sidewalks():
     bands = build_pavement_bands(junction, seg_by_key)
 
     assert len(bands) == 2
-    assert all(band.curb is None and band.inner is None for band in bands)
     for band in bands:
         next_corner = 2 * ((band.corner_index + 1) % len(junction.ends))
         assert_vec(band.outer_start, junction.polygon[2 * band.corner_index + 1])
         assert_vec(band.outer_end, junction.polygon[next_corner])
+        # Two profiles of different width meet head on: the kerbs are parallel
+        # but offset, so the join is an S-bend between them, not the diagonal
+        # chord the old straight-quad fallback drew.
+        assert band.curb is not None
+        assert_vec(band.curb.start.position, band.outer_start)
+        assert_vec(band.curb.end.position, band.outer_end)
+        assert_vec(band.curb.start.tangent, band.curb.end.tangent)
+        assert_band_width(band, RESIDENTIAL_TWO_WAY.lanes[0].width)
 
 
 def test_profile_change_keeps_pavements_inside_their_kerbs():
@@ -107,21 +130,17 @@ def test_profile_change_keeps_pavements_inside_their_kerbs():
 
     assert len(bands) == len(junction.ends)
     for band in bands:
-        assert approx(
-            band.inner.radius - band.curb.radius,
-            RESIDENTIAL_TWO_WAY.lanes[0].width,
-            1e-6,
-        )
+        assert_band_width(band, RESIDENTIAL_TWO_WAY.lanes[0].width)
 
 
 def test_a_shallow_merge_gets_a_footway_round_its_nose_not_a_quad_across_it():
     """The symptom that made shallow Y junctions unbuildable.
 
-    With no fillet at the corner, `build_pavement_bands` falls back to a
-    straight quad between the two mouths - and at a shallow angle those mouths
-    are tens of metres apart on either side of both carriageways, so the
-    "footway" was a long thin slab laid over the road. A gore nose gives the
-    band a real arc to follow, concentric by construction.
+    With no kerb at the corner, `build_pavement_bands` falls back to a straight
+    quad between the two mouths - and at a shallow angle those mouths are tens
+    of metres apart on either side of both carriageways, so the "footway" was a
+    long thin slab laid over the road. The blend gives the band a real nose to
+    follow, one sidewalk width wide by construction.
     """
     import math
 
@@ -145,6 +164,4 @@ def test_a_shallow_merge_gets_a_footway_round_its_nose_not_a_quad_across_it():
     nose = [b for b in bands if b.curb is not None]
     assert nose, "the gore corner fell back to a straight quad"
     for band in nose:
-        # Concentric, and the carriageway-facing edge is the larger radius.
-        assert_vec(band.curb.center, band.inner.center)
-        assert band.inner.radius > band.curb.radius
+        assert_band_width(band, NARROW.lanes[0].width)

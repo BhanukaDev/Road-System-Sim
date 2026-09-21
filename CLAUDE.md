@@ -24,7 +24,7 @@ uv run pytest tests/test_arc.py -v
 
 ```
 src/roadsim/
-  geometry/   pure maths: vec, curve, line, arc, path, fitting, ribbon
+  geometry/   pure maths: vec, curve, line, arc, path, fitting, ribbon, biarc
   road/       lanes, profiles, nodes, segments, junctions, network,
               markings, crosswalks, decals, lane transitions
   render/     camera, grid, curve drawing, network renderer, HUD
@@ -141,6 +141,15 @@ Landed so far:
   tapering dividers - and puts a merge arrow where a lane runs out (D15).
 - **Handedness.** `config.DRIVE_ON_LEFT`, default left. It reverses a preset's
   lane order and nothing else (D16).
+- **Junction kerbs are blends, not chords.** `geometry/biarc.py` joins two
+  points that each already have a heading, which is what a junction mouth is.
+  `Junction.blends` runs one between every adjacent pair of mouths, so the kerb
+  leaves each carriageway along that road's own tangent and bows by however much
+  the two orientations disagree - a nose at a gore, a quarter turn at a right
+  angle, an S-bend across a profile change. The pavement band is that blend
+  offset by a footway's width, so sidewalks now run *through* a bend instead of
+  stopping either side of it. Two arms meeting is a joint in one road, not a
+  crossing, and is filled as carriageway (D17).
 
 Still to come: previews that show the real road, end caps, lane anchors and
 alignment guides; shapers (straight / curve / freeform / continuous), loops,
@@ -151,5 +160,5 @@ rounded corners, the corner handle and pavements.
 showcase - which now includes a shallow gore and a lane taper - and
 `--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D16 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D17 are this
 milestone's.

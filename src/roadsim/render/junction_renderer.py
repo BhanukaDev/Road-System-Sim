@@ -1,4 +1,4 @@
-"""Draws one junction: its rounded surface, and any pavement bands its corners
+"""Draws one junction: its blended surface, and any pavement bands its corners
 carry.
 
 Extracted from `network_renderer.py` once a junction grew corners and
@@ -32,23 +32,21 @@ def draw_junction(surface: pygame.Surface, camera: Camera, junction: Junction) -
         # segments get in `network_renderer`).
         pygame.draw.lines(surface, config.Color.SEGMENT_ERROR, True, points, 2)
         return
-    pygame.draw.polygon(surface, config.Color.JUNCTION_FILL, points)
+    # Two arms meeting is not a crossing - it is one road changing cross-section
+    # or heading, and the patch between the mouths is carriageway like the rest
+    # of it. Filling it as a junction is what made a kink read as a grey wedge
+    # laid over the road rather than part of it.
+    crossing = junction.is_crossing
+    fill = config.Color.JUNCTION_FILL if crossing else config.Color.JOINT_FILL
+    pygame.draw.polygon(surface, fill, points)
 
 
 def draw_pavement_band(
     surface: pygame.Surface, camera: Camera, band: PavementBand
 ) -> None:
     tolerance = camera.world_tolerance
-    curb = (
-        []
-        if band.curb is None
-        else [band.curb.sample(s).position for s in band.curb.flatten(tolerance)]
-    )
-    inner = (
-        []
-        if band.inner is None
-        else [band.inner.sample(s).position for s in band.inner.flatten(tolerance)]
-    )
+    curb = [] if band.curb is None else band.curb.points(tolerance)
+    inner = [] if band.inner is None else band.inner.points(tolerance)
     outline = [
         band.outer_start,
         *curb,
@@ -64,15 +62,19 @@ def draw_pavement_band(
 
 
 def _rounded_outline(junction: Junction, tolerance: float) -> list[Vec2]:
-    """Walk the mouths counter-clockwise, replacing each straight corner cut
-    with its fillet's own arc where there is one.
+    """Walk the mouths counter-clockwise, running each corner's blend between
+    them instead of cutting straight across.
 
     `junction.polygon` already holds two points per end - `(right, left)` at
-    that end's own trimmed mouth (`build_junction`'s `_polygon`) - and
-    `junction.corners[i]` rounds exactly the gap between end `i`'s `left` and
-    end `i + 1`'s `right`: the two points either side of the straight cut this
-    replaces. No corner - a kink squeezed below `MIN_RADIUS`, or no room at
-    all - leaves that cut as it was.
+    that end's own trimmed mouth (`build_junction._mouths`) - and
+    `junction.blends[i]` is the kerb from end `i`'s second corner to end
+    `i + 1`'s first: exactly the two points either side of the cut it replaces.
+    The blend meets both mouths along their own roads' headings, so the fill
+    leaves the carriageway without a kink and bows the way the two orientations
+    ask it to - which is what turns a triangular gore into a nose.
+
+    A corner with no blend (two mouths on top of each other, nothing to build)
+    keeps its straight cut.
     """
     n = len(junction.ends)
     if len(junction.polygon) != 2 * n:
@@ -81,9 +83,10 @@ def _rounded_outline(junction: Junction, tolerance: float) -> list[Vec2]:
     for i in range(n):
         outline.append(junction.polygon[2 * i])
         outline.append(junction.polygon[2 * i + 1])
-        fillet = junction.corners[i] if i < len(junction.corners) else None
-        if fillet is not None:
-            outline.extend(
-                fillet.arc.sample(s).position for s in fillet.arc.flatten(tolerance)
-            )
+        blend = junction.blends[i] if i < len(junction.blends) else None
+        if blend is not None:
+            # Ends trimmed: they *are* the two mouth corners either side, and a
+            # fill with a doubled vertex is one more chance to get an edge case
+            # wrong for no gain.
+            outline.extend(blend.points(tolerance)[1:-1])
     return outline

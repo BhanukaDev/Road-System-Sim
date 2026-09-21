@@ -226,6 +226,9 @@ class Color:
     LANE_EDGE = (44, 46, 52)
 
     JUNCTION_FILL = (52, 55, 62)
+    JOINT_FILL = LANE_CAR
+    """A two-arm node is a joint in one road, not a crossing, so its patch is
+    carriageway - the same colour the ribbons either side of it are."""
     CAP_FILL = (52, 55, 62)
     STOP_LINE = (226, 226, 230)
     MARKING_WHITE = (222, 222, 216)

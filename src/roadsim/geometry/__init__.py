@@ -2,6 +2,7 @@
 
 from .aabb import Aabb, arc_bounds, curve_bounds, line_bounds, path_bounds
 from .arc import ArcSegment
+from .biarc import biarc
 from .curve import Curve, DegenerateOffsetError, Sample
 from .fillet import Fillet, corner_fillet, deflection
 from .fitting import fit_freehand, fit_polyline, simplify
@@ -39,6 +40,7 @@ __all__ = [
     "arc_arc",
     "arc_bounds",
     "arcs_overlap",
+    "biarc",
     "build_ribbon",
     "corner_fillet",
     "curve_bounds",

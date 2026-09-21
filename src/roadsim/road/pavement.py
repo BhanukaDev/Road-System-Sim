@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..geometry import ArcSegment, Vec2
+from ..geometry import DegenerateOffsetError, Path, Vec2
 from .junction import Junction, SegmentEnd
 from .lane import LaneType
 from .segment import RoadSegment
@@ -22,10 +22,13 @@ class PavementBand:
     corner_index: int
     outer_start: Vec2
     inner_start: Vec2
-    curb: ArcSegment | None
-    """Rounded outer edge, or `None` for a straight or hard corner."""
-    inner: ArcSegment | None
-    """Concentric inner edge when `curb` is rounded."""
+    curb: Path | None
+    """Kerb across the corner - the junction's own blend, or `None` when there
+    was no blend to build and the band closes as a straight quad."""
+    inner: Path | None
+    """The kerb offset by the footway's width. Offsetting arcs is exact (D1), so
+    this stays a constant width from the kerb rather than drifting the way a
+    resampled inner edge would."""
     outer_end: Vec2
     inner_end: Vec2
 
@@ -35,7 +38,7 @@ def build_pavement_bands(
 ) -> tuple[PavementBand, ...]:
     n = len(junction.ends)
     bands: list[PavementBand] = []
-    for i, fillet in enumerate(junction.corners):
+    for i in range(n):
         a, b = junction.ends[i], junction.ends[(i + 1) % n]
         start = _sidewalk_mouth(seg_by_key, a, outgoing_left=True)
         end = _sidewalk_mouth(seg_by_key, b, outgoing_left=False)
@@ -43,40 +46,42 @@ def build_pavement_bands(
             continue
         outer_start, inner_start, width_a = start
         outer_end, inner_end, width_b = end
-        if fillet is None:
-            bands.append(
-                PavementBand(
-                    junction.node_id,
-                    i,
-                    outer_start,
-                    inner_start,
-                    None,
-                    None,
-                    outer_end,
-                    inner_end,
-                )
-            )
-            continue
-        # The fillet runs along the *outer* edge of the footway, and its centre
-        # sits out in the corner the roads leave empty - so the edge towards the
-        # carriageway is the concentric arc one width *further* from that centre,
-        # never the smaller one. `offset` shifts left, which is towards the
-        # centre on this arc, hence the flipped sign; the radius only grows, so
-        # this can never collapse.
-        inner = fillet.arc.offset(-min(width_a, width_b) * fillet.arc.turn_sign)
+        curb = junction.blends[i] if i < len(junction.blends) else None
+        inner = _inner_edge(curb, min(width_a, width_b))
         bands.append(
             PavementBand(
                 junction.node_id,
                 i,
                 outer_start,
                 inner_start,
-                fillet.arc,
+                curb,
                 inner,
                 outer_end,
                 inner_end,
             )
         )
     return tuple(bands)
+
+
+def _inner_edge(curb: Path | None, width: float) -> Path | None:
+    """The kerb pushed `width` towards the carriageway.
+
+    The mouths are walked counter-clockwise, so the junction surface is on the
+    blend's **left** the whole way round - and `offset` shifts left by this
+    project's one sign convention. No `turn_sign` anywhere: which way the kerb
+    happens to bend has nothing to do with which side the road is on.
+
+    `None` when the kerb turns tighter than the footway is wide: the inner edge
+    would fold through its own centre, which is `DegenerateOffsetError`. The
+    band then closes straight across, the same as a corner with no blend at all -
+    visibly a hard corner rather than a pavement drawn inside out.
+    """
+    if curb is None:
+        return None
+    try:
+        return curb.offset(width)
+    except DegenerateOffsetError:
+        return None
 
 
 def _sidewalk_mouth(

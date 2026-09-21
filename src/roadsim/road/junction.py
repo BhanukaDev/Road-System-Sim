@@ -4,13 +4,17 @@ Nothing here is ever stored. A junction is recomputed whenever its node is
 dirty, which means a node drag or a profile change cannot leave stale geometry
 behind - the failure mode that makes stored junctions a correctness problem.
 
-What it produces is three things:
+What it produces is four things:
 
 * a **trim** for each segment end - how far that road must pull back so its
   carriageway stops at the junction mouth rather than ploughing through it;
 * a **polygon** for the junction surface, flush with those pulled-back mouths;
 * a **corner** rounding the gap between each pair of adjacent mouths, tangent
-  to both kerbs and clamped by whichever arm has less straight to give.
+  to both kerbs and clamped by whichever arm has less straight to give - which
+  is what sets the trim, since a mouth has to reach the corner it starts at;
+* a **blend** between each adjacent pair of mouths: the kerb actually drawn,
+  a biarc that meets both mouths in position and heading (D17). The corner
+  decides *where* the mouths go; the blend joins the mouths that resulted.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from ..geometry import (
     Fillet,
     Path,
     Vec2,
+    biarc,
     corner_fillet,
     deflection,
     is_simple,
@@ -89,7 +94,22 @@ class Junction:
     corners: tuple[Fillet | None, ...] = ()
     """One entry per CCW-adjacent pair of ends: `corners[i]` rounds the gap
     between `ends[i]` and `ends[(i + 1) % len(ends)]`. `None` where there is no
-    corner worth rounding - squeezed below `MIN_RADIUS`, or no room at all."""
+    corner worth rounding - squeezed below `MIN_RADIUS`, or no room at all.
+
+    This is the *trim solver's* corner: it is solved at the kerbs' apex, and its
+    tangent length is what tells each mouth how far to pull back. It is not the
+    kerb that gets drawn - see `blends`."""
+    blends: tuple[Path | None, ...] = ()
+    """The kerb actually run between each CCW-adjacent pair of mouths.
+
+    Same indexing as `corners`: `blends[i]` leaves `ends[i]`'s left mouth corner
+    along that road's own tangent and arrives at `ends[i + 1]`'s right corner
+    along that road's. A biarc, so it matches both mouths exactly in position
+    *and* direction - which a chord does not (the triangular gore) and neither
+    does `corners[i]` once anything moves a mouth off the apex it was solved at:
+    a half-width floor, a budget clamp, or simply an arm whose own curvature
+    turns the mouth frame away from the tangent ray. Being arcs, it offsets
+    exactly, so `road/pavement.py` gets a footway that follows it for free."""
     is_degenerate: bool = False
     """This node has no honest junction geometry, and nothing should be filled
     from it.
@@ -126,10 +146,18 @@ def build_junction(
     seg_by_key = {(seg.id, at_a): seg for seg, at_a in segments}
     demand, corners, unresolved = _solve_trims(ends, seg_by_key, position)
     lookup = {(seg.id, at_a): demand[(seg.id, at_a)] for seg, at_a in segments}
-    polygon = _polygon(ends, segments, lookup)
+    mouths = _mouths(ends, segments, lookup)
+    polygon = tuple(point for mouth in mouths for point in mouth[:2])
     degenerate = unresolved or not is_simple(polygon)
     return Junction(
-        node_id, position, tuple(ends), lookup, polygon, tuple(corners), degenerate
+        node_id,
+        position,
+        tuple(ends),
+        lookup,
+        polygon if len(polygon) >= 3 else (),
+        tuple(corners),
+        _blends(mouths),
+        degenerate,
     )
 
 
@@ -394,19 +422,25 @@ def _target_radius(phi: float, pull_a: float | None, pull_b: float | None) -> fl
     return config.JUNCTION_CORNER_RADIUS
 
 
-def _polygon(
+def _mouths(
     ends: list[SegmentEnd],
     segments: list[tuple[RoadSegment, bool]],
     trims: dict[tuple[int, bool], float],
-) -> tuple[Vec2, ...]:
-    """Walk the ends counter-clockwise, taking each mouth's two corners.
+) -> list[tuple[Vec2, Vec2, Vec2]]:
+    """Each end's mouth, walking the ends counter-clockwise.
 
-    Corners come from the segment's own frame at its trimmed end rather than
-    from the tangent ray, so the junction surface is flush with the ribbons that
-    stop against it even where the road is still curving.
+    One `(first corner, second corner, direction into the node)` per end, where
+    the corners are in CCW order around the junction: walking CCW we reach the
+    mouth's right corner first, then cross to its left, and at a `node_b` end
+    those are the profile's left and right.
+
+    Corners and direction both come from the segment's own frame at its trimmed
+    end rather than from the tangent ray at the node, so the junction surface is
+    flush with the ribbons that stop against it - and the blend leaving the mouth
+    leaves along the road's real heading - even where the road is still curving.
     """
     by_key = {(seg.id, at_a): seg for seg, at_a in segments}
-    corners: list[Vec2] = []
+    mouths: list[tuple[Vec2, Vec2, Vec2]] = []
     for end in ends:
         key = (end.segment_id, end.at_a)
         segment = by_key[key]
@@ -414,10 +448,36 @@ def _polygon(
         normal = frame.normal
         left = frame.position + normal * segment.profile.edges[0]
         right = frame.position + normal * segment.profile.edges[-1]
-        # Walking CCW we reach the mouth's right corner first, then cross to
-        # its left. At a `node_b` end those are the profile's left and right.
-        corners.extend((right, left) if end.at_a else (left, right))
-    return tuple(corners) if len(corners) >= 3 else ()
+        # The path's tangent runs A -> B regardless of which end this is, so at
+        # the `node_a` end it already points away from the node and has to be
+        # flipped to describe traffic arriving.
+        into = -frame.tangent if end.at_a else frame.tangent
+        first, second = (right, left) if end.at_a else (left, right)
+        mouths.append((first, second, into))
+    return mouths
+
+
+def _blends(mouths: list[tuple[Vec2, Vec2, Vec2]]) -> tuple[Path | None, ...]:
+    """The kerb between each CCW-adjacent pair of mouths, as a biarc.
+
+    From one mouth's second corner to the next mouth's first - the two points
+    either side of the gap the old code cut straight across. Each end keeps its
+    own road's heading, so the kerb leaves one carriageway and joins the other
+    without a kink, and how much it bows is set by how far apart the two mouths
+    are and how much they disagree about direction. That is the whole of "add
+    curvature based on the orientation": a gore between two nearly parallel arms
+    gets the long shallow nose it should have, and a right-angle corner gets a
+    quarter-turn, from the same construction.
+    """
+    n = len(mouths)
+    if n < 2:
+        return ()
+    blends: list[Path | None] = []
+    for i in range(n):
+        _, leaving, into_a = mouths[i]
+        arriving, _, into_b = mouths[(i + 1) % n]
+        blends.append(biarc(leaving, into_a, arriving, -into_b))
+    return tuple(blends)
 
 
 def _clamped_end_s(segment: RoadSegment, at_a: bool, trim: float) -> float:
