@@ -11,8 +11,15 @@ position; it does not connect roads and it does not offer lanes. Building a
 road onto a chosen lane of another road is `tools/draw_road.py`'s job, done in
 the stroke that draws it, where the lane the user picked is the reason the road
 exists rather than an extra meaning read into a nudge. So the drop stays
-deliberately blind to other nodes and to lane handles: landing on one changes
-nothing but the position.
+deliberately blind to lane handles: landing on one changes nothing but the
+position.
+
+**It does snap flush beside another road (D23).** The drag hands `Snapper.snap`
+the profiles of the roads meeting the dragged node, so a node brought near a
+neighbouring road is pulled sideways until the two kerbs touch and then slides
+along it. That is a position answer to a position question - the same kind of
+aid an `Anchor` is - and it is what lets a ramp's free end be laid parallel to
+its motorway in one drag instead of by eye.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from ..commands import MoveNode
 from ..context import EditorContext, Selection, ToolPreview
 from ..modifiers import Modifiers
 from ..node_grab import NodeGrab, grab_at
+from ..snapping import Snap
 from ..tool import Tool
 
 
@@ -33,6 +41,9 @@ class MoveNodeTool(Tool):
 
     def __init__(self) -> None:
         self.grab_state: NodeGrab | None = None
+        self._drop: Snap | None = None
+        """The snap the last drag step landed on, so the preview can mark what
+        the node is lined up with - a kerb, an anchor, the grid."""
 
     def deactivate(self, ctx: EditorContext) -> None:
         self.cancel(ctx)
@@ -63,6 +74,7 @@ class MoveNodeTool(Tool):
         if grab_state is None:
             return False
         self.grab_state = grab_state
+        self._drop = None
         ctx.select(Selection(node=grab_state.node_id))
         return True
 
@@ -99,20 +111,27 @@ class MoveNodeTool(Tool):
     def _target(self, ctx: EditorContext) -> Vec2:
         """Where the dragged node should sit.
 
-        Other nodes and the node's own roads stay out of the snap chain:
-        landing on another node would silently merge two nodes with nothing
-        behind the choice, and snapping a node onto a road it is already an
-        endpoint of would pin it to itself.
+        The node itself and its own roads stay out of the snap chain: snapping
+        a node onto a road it is already an endpoint of would pin it to itself.
+        Its roads' profiles go *in*, as what a `BESIDE` snap lays flush against
+        a neighbour.
         """
         node_id = self.grab_state.node_id
+        own = frozenset(ctx.network.nodes[node_id].segments)
         mods = Modifiers.current()
         drop = ctx.snapper.snap(
             ctx.cursor,
             from_point=self.grab_state.origin,
             constrain_angle=mods.shift,
             ignore_nodes=frozenset({node_id}),
-            ignore_segments=frozenset(ctx.network.nodes[node_id].segments),
+            ignore_segments=own,
+            beside=tuple(
+                ctx.network.segments[sid].profile
+                for sid in sorted(own)
+                if sid in ctx.network.segments
+            ),
         )
+        self._drop = drop
         return drop.position
 
     # -- feedback ----------------------------------------------------------
@@ -126,6 +145,7 @@ class MoveNodeTool(Tool):
                 self.grab_state.origin,
                 ctx.network.nodes[self.grab_state.node_id].position,
             ),
+            snap=self._drop,
         )
 
     def hud_lines(self, ctx: EditorContext) -> list[str]:

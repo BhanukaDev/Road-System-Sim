@@ -41,6 +41,7 @@ from .snapping import Snap, SnapKind
 SNAP_COLORS = {
     SnapKind.NODE: config.Color.SNAP_NODE,
     SnapKind.ANCHOR: config.Color.SNAP_ANCHOR,
+    SnapKind.BESIDE: config.Color.SNAP_BESIDE,
     SnapKind.SEGMENT: config.Color.SNAP_SEGMENT,
     SnapKind.ANGLE: config.Color.SNAP_ANGLE,
     SnapKind.GRID: config.Color.SNAP_GRID,
@@ -258,8 +259,11 @@ class EditorOverlay:
     def _draw_footprint(
         self, layer: pygame.Surface, camera: Camera, at: Vec2, profile: RoadProfile
     ) -> None:
-        """The road's width at the cursor, before there is a road to show."""
-        radius = max(profile.half_width * camera.zoom, 3.0)
+        """The road's width where its body would be, before there is a road to
+        show. `at` is the body's centre - which is the cursor in open space and
+        sits beside the centreline when a lane is being aimed at - so the
+        radius is half the body, not the wider of the two extents."""
+        radius = max(profile.total_width / 2.0 * camera.zoom, 3.0)
         center = camera.to_screen(at)
         pygame.draw.circle(
             layer, (*config.Color.FOOTPRINT, config.FOOTPRINT_ALPHA), center, radius
@@ -381,6 +385,20 @@ def _mark_anchor(surface, color, camera: Camera, snap: Snap) -> None:
     pygame.draw.line(surface, color, center, tip, 2)
 
 
+def _mark_beside(surface, color, camera: Camera, snap: Snap) -> None:
+    """A dashed run along the kerb the point was laid against, and the point
+    itself: the alignment is the line, so the line is what is drawn."""
+    hit = snap.beside
+    reach = config.BESIDE_MARK_PX / camera.zoom  # metres; the camera flips y
+    _dashed_line(
+        surface,
+        color,
+        camera.to_screen(hit.kerb - hit.tangent * reach),
+        camera.to_screen(hit.kerb + hit.tangent * reach),
+    )
+    pygame.draw.circle(surface, color, camera.to_screen(snap.position), 5, 1)
+
+
 def _mark_lane(surface, color, camera: Camera, snap: Snap) -> None:
     pygame.draw.circle(surface, color, camera.to_screen(snap.position), 6, 2)
 
@@ -402,6 +420,7 @@ def _mark_grid(surface, color, camera: Camera, snap: Snap) -> None:
 SNAP_MARKS: dict[SnapKind, Callable[..., None]] = {
     SnapKind.NODE: _mark_node,
     SnapKind.ANCHOR: _mark_anchor,
+    SnapKind.BESIDE: _mark_beside,
     SnapKind.LANE: _mark_lane,
     SnapKind.SEGMENT: _mark_segment,
     SnapKind.ANGLE: _mark_angle,

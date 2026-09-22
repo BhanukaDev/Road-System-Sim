@@ -1,13 +1,14 @@
-"""Starting or ending a *new* road on an existing road's lane (D21).
+"""Starting or ending a *new* road on an existing road's lane (D21, D23).
 
-`editor/lane_connect.py` answers the same question for two roads that already
-exist: merge the nodes, then solve a datum so the two chosen lanes line up.
+`editor/lane_connect.py` answered the same question for two roads that already
+existed: merge the nodes, then solve a datum so the two chosen lanes line up.
 A road being drawn has it easier in one respect and harder in another.
 
-Easier: there is nothing to merge. The stroke simply ends at the node the lane
-handle belongs to, which `tools/draw_road.py:_endpoint` already knows how to
-do for any `NODE` snap - a lane handle is a node snap that also remembers
-*which* lane was pointed at.
+Easier: there is nothing to merge. The stroke simply ends at the handle's
+*centre* - the node the handle sits at, or the point a split will put one at
+when the handle is along a road - which `tools/draw_road.py:_endpoint` already
+knows how to do for a `NODE` or `SEGMENT` snap. A lane handle is one of those
+that also remembers *which* lane was pointed at.
 
 Harder: at the moment the user clicks the first point, the new road has no
 direction yet, so there is no frame to measure a lane offset in and nothing to
@@ -16,7 +17,7 @@ and both ends can be answered by the same function.
 
 **Which lane pairs with which.** The picked handle is resolved to a lateral
 offset `t` in the *new* road's own end frame - a pure world-space projection,
-so the four grab/drop orientations `editor/lane_connect.py` has to reason
+so the four grab/drop orientations `editor/lane_connect.py` had to reason
 about collapse into one case with no flip term, the same way `D18` makes a
 lane drag flip-free. The new road's own lane and edge offsets are then
 searched for the nearest to `t`, and the datum shifts the profile by the
@@ -28,7 +29,7 @@ up" means the same thing whatever the two profiles are.
 
 from __future__ import annotations
 
-from ..geometry import Path
+from ..geometry import Path, Vec2
 from ..road.lane_handle import LaneHandle
 from ..road.profile import RoadProfile
 
@@ -38,6 +39,13 @@ def lane_candidates(profile: RoadProfile) -> tuple[float, ...]:
     the edges between them, exactly the set `road/lane_handle.py` publishes at
     a node, so what the user can aim at and what can be matched are one list."""
     return tuple(profile.lane_center(k) for k in profile.indices()) + profile.edges
+
+
+def datum_for_lateral(profile: RoadProfile, t: float) -> float:
+    """The datum that puts `profile`'s nearest lane or edge at lateral `t`,
+    measured in the frame of the road that will carry it."""
+    own = min(lane_candidates(profile), key=lambda offset: abs(offset - t))
+    return profile.datum + (t - own)
 
 
 def datum_for_lane_target(
@@ -50,9 +58,7 @@ def datum_for_lane_target(
     travel rather than from the target's.
     """
     frame = path.sample(0.0 if at_a else path.length)
-    t = (target.position - frame.position).dot(frame.normal)
-    own = min(lane_candidates(profile), key=lambda offset: abs(offset - t))
-    return profile.datum + (t - own)
+    return datum_for_lateral(profile, (target.position - frame.position).dot(frame.normal))
 
 
 def profile_for_lane_ends(
@@ -76,3 +82,22 @@ def profile_for_lane_ends(
     return profile.with_datum(
         datum_for_lane_target(profile, path, target is start, target)
     )
+
+
+def footprint_on_lane(profile: RoadProfile, target: LaneHandle) -> Vec2:
+    """Where the *body* of a road started on `target` would be centred, before
+    the road has a direction to solve the real datum from.
+
+    The footprint disc is the one piece of the preview that exists before a
+    first point, so it cannot wait for the fitted path the way the datum does.
+    It assumes the new road leaves along the target road's own tangent - the
+    frame the handle was published in - which is what a lane continuation or a
+    shallow ramp does, and is symmetric enough that the disc lands in the same
+    place for a road leaving the other way on every two-way profile. A road's
+    body is centred `datum` to the left of its centreline (`RoadProfile.edges`
+    is symmetric about the datum), so the disc sits at the handle's centre plus
+    the datum the target would produce; once a point is placed the ghost takes
+    over with the exact answer.
+    """
+    datum = datum_for_lateral(profile, target.offset)
+    return target.centre + target.normal * datum

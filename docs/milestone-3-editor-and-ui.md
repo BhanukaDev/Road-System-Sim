@@ -420,6 +420,15 @@ Six things were brought forward or found while building, and are recorded in
   and a radius drag one - `round_radius` onto `config.RADIUS_LADDER`. The
   three never actually compete: the radius snap acts on a scalar an `ARC_END`
   handle alone reaches, never a point the other two share.
+- **Lanes joined anywhere along a road, and roads laid alongside (D23).**
+  `road/lane_handle.py` builds a handle at any station; the draw tool shows a
+  road's lanes at the cursor's station and a click there splits the road and
+  joins by that lane, so a ramp leaves a motorway from its outer kerb rather
+  than its centreline. The footprint disc moves to where the shifted body will
+  be. `SnapKind.BESIDE` (`Snapper.snap(..., beside=profiles)`) pulls a free
+  point parallel to a neighbouring road, `config.BESIDE_GAP` between kerbs,
+  for both the draw tool and the move tool - an alignment aid like an anchor,
+  never a connection.
 
 Stop lines and turn decals also stopped spanning the whole carriageway: both now
 cover the approach half of a mouth only. Handedness arrived as

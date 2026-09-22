@@ -188,6 +188,21 @@ Landed so far:
   geometry); before a first point the profile's width follows the cursor as a
   footprint disc.
 
+- **A lane can be joined anywhere along a road, and roads run alongside each
+  other (D23).** `road/lane_handle.py` builds a handle at any station, not only
+  at a node; hovering a road in the **draw** tool shows its lanes at the cursor's
+  station and always names the nearest lane line. Clicking one splits the road
+  there and joins the new node by that lane, one undo step, with the datum
+  solved as at a node. The footprint disc moves to where the shifted road's
+  *body* will be instead of sitting on the centreline. `SnapKind.BESIDE` pulls a
+  free point sideways so the road being placed runs parallel to a neighbour,
+  `config.BESIDE_GAP` between the kerbs - an alignment aid, like an anchor,
+  offered to both the draw tool (with the profile the road will actually be
+  built with) and the move tool (with the dragged node's own roads). Kerb
+  beside kerb only, never lane on lane: that would put two carriageways through
+  each other. The verge is not zero because a joined ramp touching its road
+  shares a kerb line and leaves the junction no gore to resolve.
+
 Still to come: shapers (straight / curve / freeform / continuous), loops,
 bulldoze and replace; levels, colliders and crossings; then exact junction trims,
 rounded corners, the corner handle and pavements.
@@ -196,5 +211,5 @@ rounded corners, the corner handle and pavements.
 showcase - which now includes a shallow gore and a lane taper - and
 `--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D22 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D23 are this
 milestone's.

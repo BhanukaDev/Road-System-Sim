@@ -1,7 +1,7 @@
 """What a tool offers the user to take hold of, as data.
 
 A handle is a *point you can grab*. Two families produce them - lane handles at
-a node (`road/lane_handle.py`) and shape handles along a road
+a node or along a road (`road/lane_handle.py`) and shape handles along a road
 (`road/shape_handle.py`) - and both arrive here before they reach the screen,
 so `editor/overlay.py` draws one loop over one list rather than learning where
 each family came from.
@@ -15,6 +15,7 @@ way `guides` was added.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -25,9 +26,9 @@ from ..road.network import RoadNetwork
 
 class HandleKind(Enum):
     LANE = "lane"
-    """A lane's own centreline where it meets a node."""
+    """A lane's own centreline where it meets a node, or at a station along a road."""
     EDGE = "edge"
-    """A boundary between two lanes, or a kerb, where it meets a node."""
+    """A boundary between two lanes, or a kerb, at the same places."""
     CONTROL = "control"
     """An authoritative interior control point of a road."""
     ARC_MID = "arc_mid"
@@ -52,17 +53,17 @@ _LANE_KIND = {
 }
 
 
-def node_preview_handles(
-    network: RoadNetwork, node_id: int, active: LaneHandle | None = None
+def lane_preview_handles(
+    handles: Iterable[LaneHandle], active: LaneHandle | None = None
 ) -> list[PreviewHandle]:
-    """Every lane and edge handle at a node, as preview data.
+    """Lane and edge handles as preview data, with the live one marked.
 
     One helper rather than one per tool: a lane handle looks the same whoever
-    is offering it, and the only thing a tool decides is *which* node to offer
-    and which handle is currently live. `active` is compared by position, not
-    identity, because the handle a tool is holding was read from an earlier
-    rebuild of the network and is a different object to the one this call
-    derives.
+    is offering it, and the only thing a tool decides is *which* set to offer
+    and which handle is currently live. `active` is compared by what it names -
+    segment, kind, index - not by identity, because the handle a tool is
+    holding was read from an earlier rebuild of the network and is a different
+    object to the one this call derives.
     """
     return [
         PreviewHandle(
@@ -73,5 +74,12 @@ def node_preview_handles(
             and handle.index == active.index
             and handle.segment_id == active.segment_id,
         )
-        for handle in node_lane_handles(network, node_id)
+        for handle in handles
     ]
+
+
+def node_preview_handles(
+    network: RoadNetwork, node_id: int, active: LaneHandle | None = None
+) -> list[PreviewHandle]:
+    """Every lane and edge handle at a node, as preview data."""
+    return lane_preview_handles(node_lane_handles(network, node_id), active)

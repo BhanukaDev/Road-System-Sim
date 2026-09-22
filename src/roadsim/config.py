@@ -117,6 +117,26 @@ make picking a particular one a matter of luck."""
 SNAP_ANCHOR_PX = 10.0
 """Reach of a lane anchor - deliberately tighter than a plain segment snap, so
 it only wins when the cursor is genuinely lined up with that lane."""
+SNAP_BESIDE_PX = 10.0
+"""Reach of an alongside snap - the point pulled sideways so the road being
+placed runs parallel to a neighbouring road, `BESIDE_GAP` from its kerb (D23).
+The same reach as an anchor, for the same reason: it is an alignment, and it
+should win only when the cursor is already nearly there."""
+BESIDE_GAP = 2.0
+"""Metres of verge an alongside snap leaves between the two kerbs.
+
+Not zero, for two reasons that agree. Two carriageways touching kerb to kerb
+are one wider carriageway with a lane line down it, which is a lane transition
+(`road/transition.py`), not two roads; a ramp or a service road that is its own
+road sits behind a verge or a barrier. And the junction model says the same
+thing: a ramp that leaves a road and then runs touching it shares that road's
+kerb line, so `road/junction.py` finds no gore to close and flags the node
+degenerate, where a ramp two metres out resolves at the angles a ramp leaves at.
+Set it to 0.0 to snap kerb against kerb regardless."""
+BESIDE_MARK_PX = 36.0
+"""Half-length, on screen, of the line drawn along the kerb a `BESIDE` snap
+lined up with - long enough to read as a direction, short enough not to look
+like a road."""
 SNAP_GRID_PX = 9.0
 SHAPE_HANDLE_PX = 10.0
 """Reach of a shape handle along a selected road's own outline - `editor/
@@ -307,6 +327,7 @@ class Color:
     SNAP_NODE = (120, 226, 160)
     SNAP_SEGMENT = (120, 190, 226)
     SNAP_ANCHOR = (226, 190, 120)
+    SNAP_BESIDE = (226, 160, 120)
     SNAP_LANE = (140, 226, 214)
     SNAP_GRID = (140, 146, 158)
     SNAP_ANGLE = (226, 150, 220)

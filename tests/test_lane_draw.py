@@ -68,7 +68,7 @@ def test_datum_puts_the_nearest_lane_exactly_on_the_target():
     network.rebuild_all()
     target = _handle(other, other.node_a, True, LaneHandleKind.LANE, 3)
 
-    path = fit_polyline([Vec2(-40.0, 0.0), target.node_position], RADIUS)
+    path = fit_polyline([Vec2(-40.0, 0.0), target.centre], RADIUS)
     datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, False, target)
     shifted = RESIDENTIAL_TWO_WAY.with_datum(datum)
 
@@ -87,7 +87,7 @@ def test_the_lane_it_picks_is_the_one_already_nearest():
     network.rebuild_all()
     target = _handle(other, other.node_a, True, LaneHandleKind.LANE, 4)
 
-    path = fit_polyline([Vec2(-40.0, 0.0), target.node_position], RADIUS)
+    path = fit_polyline([Vec2(-40.0, 0.0), target.centre], RADIUS)
     datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, False, target)
 
     # Target is left of centre in the new road's own frame (both run east), so
@@ -109,7 +109,7 @@ def test_either_end_of_the_new_road_can_be_the_one_that_joins(at_a):
     target = _handle(other, other.node_a, True, LaneHandleKind.EDGE, 0)
 
     far = Vec2(-40.0, 0.0)
-    points = [target.node_position, far] if at_a else [far, target.node_position]
+    points = [target.centre, far] if at_a else [far, target.centre]
     path = fit_polyline(points, RADIUS)
     datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, at_a, target)
     shifted = RESIDENTIAL_TWO_WAY.with_datum(datum)

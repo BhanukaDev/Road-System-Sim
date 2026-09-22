@@ -8,12 +8,22 @@ downstream can tell which one the user did.
 An end that lands on an existing road splits it first, in the same undo step, so
 a T-junction is one action and one undo.
 
-**An end that lands on a lane handle joins by that lane (D21).** Hovering a
-node here publishes its lane and edge handles, and clicking one ends the road
-at that node with its profile shifted so the chosen lane lines up
-(`editor/lane_draw.py`). The pairing is solved at commit, not at the click:
-until the stroke has a direction there is no frame to measure a lane offset
-in, and the same function then answers for both ends of the finished path.
+**An end that lands on a lane handle joins by that lane (D21, D23).** Hovering
+a node here publishes its lane and edge handles; hovering a road publishes the
+same handles at the station under the cursor. Clicking one at a node ends the
+road at that node; clicking one along a road splits the road there first, the
+way a centreline snap does. Either way the new road's profile is shifted so the
+chosen lane lines up (`editor/lane_draw.py`). The pairing is solved at commit,
+not at the click: until the stroke has a direction there is no frame to
+measure a lane offset in, and the same function then answers for both ends of
+the finished path. Before a first point, the footprint disc sits where the
+*body* of that shifted road would be, not on the centreline it will hang off.
+
+**A free end can run flush beside another road.** With nothing under the
+cursor to connect to, `Snapper.snap` is told the active profile, so a point
+near a neighbouring road is pulled sideways until the two kerbs touch - the
+`BESIDE` snap - and slides along it. That is how the parallel run of a ramp is
+placed without reading widths off the screen.
 
 **The preview is the commit, one frame early (D22).** Every frame the tool
 plans the road it would build if the user clicked now - placed corners plus
@@ -34,6 +44,7 @@ import pygame
 
 from ... import config
 from ...geometry import Path, Vec2, fit_freehand, fit_polyline, ray_ray
+from ...road.lane_handle import handles_beside, segment_lane_handles
 from ...road.network import RoadNetwork
 from ...road.profile import RoadProfile
 from ..commands import (
@@ -47,9 +58,9 @@ from ..commands import (
 from ..context import AngleReadout, EditorContext, ToolPreview
 from ..ghost import Ghost, ghost_of
 from ..guides import find_guides
-from ..handle import PreviewHandle, node_preview_handles
+from ..handle import PreviewHandle, lane_preview_handles, node_preview_handles
 from ..highlight import Highlight
-from ..lane_draw import profile_for_lane_ends
+from ..lane_draw import footprint_on_lane, profile_for_lane_ends
 from ..modifiers import Modifiers
 from ..snapping import Snap, SnapKind
 from ..tool import Tool
@@ -58,7 +69,7 @@ from ..tool import Tool
 class DrawRoadTool(Tool):
     name = "draw"
     hint = (
-        "click corners, or drag to sketch   click a lane to join by it   "
+        "click corners, or drag to sketch   click a lane (at a node or along a road) to join by it   "
         "[Enter]/right-click commit   [Backspace] undo point   "
         "[Shift] 15 deg   [Esc] cancel"
     )
@@ -221,7 +232,7 @@ class DrawRoadTool(Tool):
         preview.handles = self._lane_handles(ctx, snap)
         if not self.points and not self._dragging:
             # Nothing to ghost yet: show the road's width where it would begin.
-            preview.footprint = ctx.cursor
+            preview.footprint = _footprint(ctx, snap)
 
         points = self.stroke if self._dragging else [*self.points, ctx.cursor]
         if points and len(points) >= 2:
@@ -267,12 +278,18 @@ class DrawRoadTool(Tool):
     def _lane_handles(
         self, ctx: EditorContext, snap: Snap | None
     ) -> list[PreviewHandle]:
-        """Every lane handle of the node the cursor is near, with the one being
-        aimed at marked. Offered while drawing and not while moving (D21),
-        because here picking one is the whole point of the click."""
-        if snap is not None and snap.kind is SnapKind.LANE:
+        """Every lane handle where the cursor is - the node it is near, or the
+        station of the road it is over - with the one being aimed at marked.
+        Offered while drawing and not while moving (D21), because here picking
+        one is the whole point of the click."""
+        if snap is not None and snap.lane_handle is not None:
             handle = snap.lane_handle
-            return node_preview_handles(ctx.network, handle.node_id, handle)
+            return lane_preview_handles(handles_beside(ctx.network, handle), handle)
+        if snap is not None and snap.kind is SnapKind.SEGMENT:
+            segment_id, s = snap.segment_hit
+            segment = ctx.network.segments.get(segment_id)
+            if segment is not None:
+                return lane_preview_handles(segment_lane_handles(segment, s))
         near = ctx.snapper.nearest_node(ctx.cursor)
         if near is None:
             return []
@@ -295,7 +312,25 @@ class DrawRoadTool(Tool):
             point,
             from_point=self.points[-1] if self.points else None,
             constrain_angle=mods.shift,
+            beside=(self._profile_if_ended_at(ctx, point),),
         )
+
+    def _profile_if_ended_at(self, ctx: EditorContext, point: Vec2) -> RoadProfile:
+        """The cross-section the road would be built with if it ended at
+        `point` - the active profile, shifted if the stroke began on a lane.
+
+        A `BESIDE` snap lays a *kerb* against a neighbour, and a road that
+        started on a lane has had its kerbs moved by the datum that lane
+        produced, so the flush position has to be solved for the shifted
+        profile or the parallel run ends up a lane's width off. The datum
+        depends on the start frame, which two or more placed points fix
+        before the end is chosen; with one point placed the frame still turns
+        with the cursor and the answer is the best estimate until the next
+        click - the ghost shows the truth either way.
+        """
+        if not self.points or self.start_snap is None or self.start_snap.lane_handle is None:
+            return ctx.profile
+        return _profile_for(ctx, [*self.points, point], self.start_snap, None)
 
 
 def build_road_command(
@@ -386,11 +421,21 @@ def _highlights(snap: Snap | None) -> list[Highlight]:
     on nothing, so it lights nothing."""
     if snap is None:
         return []
-    if snap.kind is SnapKind.SEGMENT:
-        return [Highlight.segment(snap.segment_hit[0])]
     if snap.attach_node_id is not None:
         return [Highlight.node(snap.attach_node_id)]
+    if snap.segment_hit is not None:
+        return [Highlight.segment(snap.segment_hit[0])]
     return []
+
+
+def _footprint(ctx: EditorContext, snap: Snap | None) -> Vec2:
+    """Where the disc goes before a first point: under the cursor, unless a
+    lane is being aimed at, when it moves to where that lane would put the
+    road's body - so the user sees the ramp beside the carriageway, not a
+    disc on the centreline it will hang off (D23)."""
+    if snap is not None and snap.lane_handle is not None:
+        return footprint_on_lane(ctx.profile, snap.lane_handle)
+    return ctx.cursor
 
 
 def _profile_for(
@@ -419,11 +464,12 @@ def _profile_for(
 def _endpoint(steps: list[Command], point: Vec2, snap: Snap | None) -> NodeSlot:
     """Turn one end of the stroke into a node id, adding commands as needed.
 
-    A `LANE` snap resolves to its own node: the lane it names is honoured by
+    A `LANE` snap resolves to its own node - the one it sits at, or the one
+    the split makes when it sits along a road: the lane it names is honoured by
     the profile's datum (`_profile_for`), never by a second node."""
     if snap is not None and snap.attach_node_id is not None:
         return NodeSlot(snap.attach_node_id)
-    if snap is not None and snap.kind is SnapKind.SEGMENT:
+    if snap is not None and snap.segment_hit is not None:
         segment_id, s = snap.segment_hit
         split = SplitSegment(segment_id, s)
         steps.append(split)
@@ -490,7 +536,9 @@ def _snap_at_cursor(ctx: EditorContext) -> Snap:
     """The preview's fallback when no motion has been seen yet - the same
     priority as a real hover, minus the angle constraint, which belongs to a
     live modifier key and not to a repaint."""
-    return ctx.snapper.nearest_lane_handle(ctx.cursor) or ctx.snapper.snap(ctx.cursor)
+    return ctx.snapper.nearest_lane_handle(ctx.cursor) or ctx.snapper.snap(
+        ctx.cursor, beside=(ctx.profile,)
+    )
 
 
 def _pixels_from(a: tuple[int, int], b: tuple[int, int]) -> float:
@@ -522,7 +570,7 @@ def _arms_at_snap(network: RoadNetwork, snap: Snap) -> list[Vec2]:
             if segment is not None:
                 arms.append(segment.outgoing_dir(segment.is_at_a(node.id)))
         return arms
-    if snap.kind is SnapKind.SEGMENT:
+    if snap.segment_hit is not None:
         segment_id, s = snap.segment_hit
         segment = network.segments.get(segment_id)
         if segment is None:

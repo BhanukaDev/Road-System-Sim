@@ -806,3 +806,85 @@ width as a disc under the cursor: the road type reads before the road exists.
 check run in 2-4 ms per frame on the demo network, once per frame regardless
 of how many motion events arrive. The layer is a full-window surface kept
 between frames and cleared only when there is something to put on it.
+
+## D23. A lane can be joined anywhere along a road, and a road can run alongside one
+
+**The symptom.** D21 put lane handles at nodes, so a road could be drawn onto
+a chosen lane of another road - but only where that road already ended. The
+shape that motivated the feature, a ramp leaving a motorway from its outer lane
+and running parallel to it, has no node where the ramp leaves: the motorway is
+one long segment. Drawing onto it mid-way gave the centreline split of M2, a
+road built to the *middle* of the carriageway, and the user then had nothing
+to place the parallel run against but their eye. Three things were missing, and
+the footprint disc made the first of them look worse than it was: aiming at a
+lane handle put the disc on the node, because the road's centreline does end
+there, so the disc said "centre" while the click meant "kerb".
+
+**Handles at any station.** `road/lane_handle.py`'s handle is now built from
+`segment.path.sample(station)` for any `station`; a handle at a node is the
+special case `station in (0, length)` with `node_id` set, and the old
+`segment_end_handles` is that wrapper. `Snapper.nearest_lane_handle` offers
+the handles at the station the cursor projects to, anywhere over the
+carriageway and within reach outside its kerbs, always the *nearest* lane line
+rather than only one within a tight radius - so hovering a road always names a
+lane and never falls through to a grid point that the ghost then flags for
+crossing the road it is over. Within a node's own snap reach of either end the
+node's handles keep the cursor to themselves, because two sets a few pixels
+apart would fight, and a split that close would leave a stub.
+
+A `LANE` snap along a road resolves the way D21's resolves at a node, plus one
+step: `Snap.segment_hit` names the split, `_endpoint` makes it with the same
+`SplitSegment` a centreline snap uses, and the new road joins the node the
+split creates with its datum solved from the handle exactly as before -
+`datum_for_lane_target` only ever read `handle.position`. One `Composite`, one
+undo step. The pairing is still lateral in the new road's own end frame: a road
+arriving square on sees the kerb *ahead* of it, not beside it, gets a lateral
+of zero and joins by the centreline - which is the right answer for a T, and
+`tests/test_lane_along_road.py` aims its merge shallow for that reason.
+
+**The footprint sits where the body will be.** A profile's body is centred
+`datum` to the left of its centreline (`RoadProfile.edges` is symmetric about
+the datum), so `footprint_on_lane` puts the disc at the handle's centre plus
+the datum that handle would produce, and the overlay draws it at half the
+*total* width rather than the wider extent. The datum needs a frame and the
+disc exists before the road has one, so it assumes the road leaves along the
+target road's own tangent; that is what a continuation or a shallow ramp does,
+and once a point is placed the ghost takes over with the exact answer.
+
+**Alongside is kerb beside kerb, a verge apart, and nothing else.**
+`SnapKind.BESIDE` pulls a free point sideways so the road being placed runs
+parallel to a neighbouring road with `config.BESIDE_GAP` between the two
+kerbs, and slides along it. It is an alignment aid with a free point, like
+`ANCHOR` (D5), and it is only offered when the caller says what is being placed
+- `Snapper.snap(..., beside=profiles)` - because "alongside" has no meaning
+without a width. Only kerbs pair: every other pairing of one road's lane lines
+with another's puts the two carriageways through each other, which is a
+crossing to be drawn as one. Both of a profile's kerbs are tried against both
+of the neighbour's, so the two roads may run either way. The point has to be
+genuinely beside the road - a projection that clamped to an end is beyond it,
+and extending a kerb line past a dead end stays `Anchor`'s job.
+
+The verge is not zero, and the model and the world agree on why. Two
+carriageways touching kerb to kerb are one wider carriageway with a lane line
+down it - a transition (D15), not two roads - and a real ramp or service road
+sits behind a verge or a barrier. The junction says the same: a ramp that
+leaves a road and then runs touching it shares that road's kerb line, so
+`road/junction.py` finds no crossing to close the gore at and flags the node
+degenerate, while the same ramp two metres out resolves at the angles a ramp
+leaves at. `BESIDE_GAP` is a tunable, and 0.0 snaps kerb against kerb for
+whoever wants it.
+
+**Both tools use it, with the profile that is true for them.** The draw tool
+hands `snap()` the profile the road would be *built* with - the active one,
+shifted by the start's lane if the stroke began on one - because a road that
+started on a lane has had its kerbs moved by that datum, and solving the
+parallel run for the unshifted profile leaves it a lane's width off. The datum
+depends on the start frame, which two placed points fix before the end is
+chosen, so the answer is exact for the ramp shape; with one point placed it is
+the best estimate until the next click. The move tool hands over the profiles
+of the roads meeting the dragged node. That is still one node, one handle, one
+question (D21): the snap answers *where* the node goes and connects nothing.
+
+**What did not change.** `editor/lane_draw.py`'s solver, the datum-in-the-name
+rule (`RoadProfile.with_datum`), `SplitSegment`, and the ghost. The mid-road
+join is the node join plus a split the editor already knew how to make.
