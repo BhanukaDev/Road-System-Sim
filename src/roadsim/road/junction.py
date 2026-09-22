@@ -75,7 +75,7 @@ class SegmentEnd:
 
     @staticmethod
     def of(segment: RoadSegment, at_a: bool) -> SegmentEnd:
-        profile: RoadProfile = segment.profile
+        profile: RoadProfile = segment.profile_at(at_a)
         left, right = profile.extent_left, profile.extent_right
         if not at_a:
             left, right = right, left
@@ -133,18 +133,27 @@ def build_junction(
     node_id: int,
     position: Vec2,
     segments: list[tuple[RoadSegment, bool]],
+    run_lengths: dict[tuple[int, bool], float] | None = None,
 ) -> Junction | None:
     """Derive the junction at a node from the `(segment, at_a)` ends meeting there.
 
     Returns None when there is nothing to build: a dead end, or two ends of the
     same profile simply running through (a joint in one road, not a junction).
+
+    `run_lengths` is how much road each arm has behind it, joints included
+    (`RoadNetwork.run_length`); it sizes the trim budget. Left out, each arm
+    is taken to be its own whole road.
     """
     ends = sorted((SegmentEnd.of(seg, at_a) for seg, at_a in segments), key=_angle_key)
     if len(ends) < 2 or _is_through_joint(ends, segments):
         return None
 
     seg_by_key = {(seg.id, at_a): seg for seg, at_a in segments}
-    demand, corners, unresolved = _solve_trims(ends, seg_by_key, position)
+    runs = {
+        key: (run_lengths or {}).get(key, seg.path.length)
+        for key, seg in seg_by_key.items()
+    }
+    demand, corners, unresolved = _solve_trims(ends, seg_by_key, position, runs)
     lookup = {(seg.id, at_a): demand[(seg.id, at_a)] for seg, at_a in segments}
     mouths = _mouths(ends, segments, lookup)
     polygon = tuple(point for mouth in mouths for point in mouth[:2])
@@ -177,16 +186,45 @@ def _is_through_joint(
     """
     if len(ends) != 2:
         return False
-    a, b = segments
-    if a[0].profile != b[0].profile:
+    (seg_a, a_at_a), (seg_b, b_at_a) = segments
+    if not sections_run_through(seg_a, a_at_a, seg_b, b_at_a):
         return False
     return ends[0].outgoing_dir.dot(ends[1].outgoing_dir) < -0.999
+
+
+def section_leaving(segment: RoadSegment, at_a: bool) -> RoadProfile:
+    """The cross-section of `segment` at its `at_a` end, as seen travelling
+    *away* from the node there: left-to-right in the direction of departure.
+    Leaving along A -> B is the profile as stored; leaving along B -> A is its
+    mirror."""
+    profile = segment.profile_at(at_a)
+    return profile if at_a else profile.mirrored()
+
+
+def sections_run_through(
+    seg_a: RoadSegment, a_at_a: bool, seg_b: RoadSegment, b_at_a: bool
+) -> bool:
+    """Two ends at one node carry the same tarmac straight through.
+
+    Compared *physically* - each section oriented as it leaves the node, one
+    of them mirrored so both read in one direction of travel - rather than by
+    profile identity. Identity was wrong two ways round: two symmetric roads
+    joined head to head are one road but had different orientations, and an
+    asymmetric road joined head to head to itself has its wide side switching
+    kerbs at the joint, which is a lane change and not a through joint at all.
+    A taper's end reads its own end's profile (`RoadSegment.profile_at`), so a
+    taper continues the road it was drawn from without a seam (D26).
+    """
+    leaving_a = section_leaving(seg_a, a_at_a)
+    leaving_b = section_leaving(seg_b, b_at_a)
+    return leaving_a.same_section(leaving_b.mirrored())
 
 
 def _solve_trims(
     ends: list[SegmentEnd],
     seg_by_key: dict[tuple[int, bool], RoadSegment],
     node_position: Vec2,
+    runs: dict[tuple[int, bool], float],
 ) -> tuple[dict[tuple[int, bool], float], list[Fillet | None], bool]:
     """Each end pulls back far enough to clear every neighbour it shares a
     corner with, and never less than its own half-width.
@@ -211,11 +249,13 @@ def _solve_trims(
             seg_by_key[(a.segment_id, a.at_a)],
             seg_by_key[(b.segment_id, b.at_a)],
         )
-        result = _pair_demand(a, b, seg_a, seg_b, node_position)
+        key_a, key_b = (a.segment_id, a.at_a), (b.segment_id, b.at_a)
+        result = _pair_demand(
+            a, b, seg_a, seg_b, node_position, runs[key_a], runs[key_b]
+        )
         if result is None:
             continue
         fillet, reach_a, reach_b, pair_unresolved = result
-        key_a, key_b = (a.segment_id, a.at_a), (b.segment_id, b.at_a)
         demand[key_a] = max(demand[key_a], reach_a)
         demand[key_b] = max(demand[key_b], reach_b)
         corners[i] = fillet
@@ -229,6 +269,8 @@ def _pair_demand(
     seg_a: RoadSegment,
     seg_b: RoadSegment,
     node_position: Vec2,
+    run_a: float,
+    run_b: float,
 ) -> tuple[Fillet | None, float, float, bool] | None:
     """The corner between `a` and `b`, and how far back each end must pull.
 
@@ -257,7 +299,8 @@ def _pair_demand(
         return None
 
     floor = config.JUNCTION_MAX_TRIM_FACTOR * max(a.half_width, b.half_width)
-    limit_a, limit_b = _trim_budget(seg_a, floor), _trim_budget(seg_b, floor)
+    limit_a = _trim_budget(seg_a, floor, run_a)
+    limit_b = _trim_budget(seg_b, floor, run_b)
     raw_a, raw_b = _reach(seg_a, a.at_a, apex), _reach(seg_b, b.at_a, apex)
 
     # Unresolved means the kerbs do not separate inside what either road can
@@ -289,15 +332,22 @@ def _pair_demand(
     )
 
 
-def _trim_budget(segment: RoadSegment, floor: float) -> float:
+def _trim_budget(segment: RoadSegment, floor: float, run_length: float) -> float:
     """How far this arm may be pulled back before the junction is giving up.
 
     A width multiple alone has no angle term, and a shallow merge's demand is
     all angle - so the budget also grows with the arm's own length, which is
     what lets a long ramp hold the long gore it genuinely needs while a stub
     still cannot be eaten by its own junction (`config.JUNCTION_MAX_TRIM_FACTOR`).
+
+    The length is the *run* - this segment plus whatever continues straight
+    through same-profile joints beyond it (`RoadNetwork.run_length`) - because
+    a road cut into pieces (D24) is not a row of stubs. The trim itself still
+    has to fit inside this segment: it can never reach past the far node, so
+    the budget is capped at the segment less the carriageway it must keep.
     """
-    return max(floor, config.JUNCTION_MAX_TRIM_FRACTION * segment.path.length)
+    budget = max(floor, config.JUNCTION_MAX_TRIM_FRACTION * run_length)
+    return min(budget, max(floor, segment.path.length - config.MIN_CARRIAGEWAY))
 
 
 def _room(
@@ -353,6 +403,10 @@ def _kerb_run(segment: RoadSegment, end: SegmentEnd, *, left: bool) -> Path | No
     because that is the only order in which they chain into a valid `Path`.
     """
     d = _physical_offset(end, left=left)
+    if segment.is_transition:
+        # A taper's kerb is the line between its two mouths' edges (D28), not
+        # an offset of its chord - and it is one straight, so it is the run.
+        return Path.of(segment.kerb_line(left=d >= 0.0))
     pieces = segment.path.pieces
     outward = pieces if end.at_a else tuple(reversed(pieces))
     run: list[Curve] = []
@@ -444,10 +498,11 @@ def _mouths(
     for end in ends:
         key = (end.segment_id, end.at_a)
         segment = by_key[key]
-        frame = segment.path.sample(_clamped_end_s(segment, end.at_a, trims[key]))
+        frame = segment.frame_at(_clamped_end_s(segment, end.at_a, trims[key]), end.at_a)
         normal = frame.normal
-        left = frame.position + normal * segment.profile.edges[0]
-        right = frame.position + normal * segment.profile.edges[-1]
+        profile = segment.profile_at(end.at_a)
+        left = frame.position + normal * profile.edges[0]
+        right = frame.position + normal * profile.edges[-1]
         # The path's tangent runs A -> B regardless of which end this is, so at
         # the `node_a` end it already points away from the node and has to be
         # flipped to describe traffic arriving.

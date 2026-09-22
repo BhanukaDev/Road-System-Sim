@@ -45,12 +45,9 @@ SNAP_COLORS = {
     SnapKind.SEGMENT: config.Color.SNAP_SEGMENT,
     SnapKind.ANGLE: config.Color.SNAP_ANGLE,
     SnapKind.GRID: config.Color.SNAP_GRID,
-    SnapKind.LANE: config.Color.SNAP_LANE,
 }
 
 HANDLE_STYLES: dict[HandleKind, tuple[tuple[int, int, int], int, int]] = {
-    HandleKind.LANE: (config.Color.HANDLE_LANE, 4, 1),
-    HandleKind.EDGE: (config.Color.HANDLE_EDGE, 3, 1),
     HandleKind.CONTROL: (config.Color.HANDLE_CONTROL, 5, 0),
     HandleKind.ARC_MID: (config.Color.HANDLE_DERIVED, 4, 1),
     HandleKind.ARC_END: (config.Color.HANDLE_DERIVED, 3, 1),
@@ -140,12 +137,24 @@ class EditorOverlay:
         network: RoadNetwork,
         selection: Selection,
     ) -> None:
+        """The selected road is washed over its whole carriageway in the
+        selection colour - the same shape the hover wash takes, so "this is
+        lit" and "this is chosen" read as the same thing in two colours."""
         if selection.segment is None or selection.segment not in network.segments:
             return
         segment = network.segments[selection.segment]
-        points = to_screen_points(camera, segment.path.points(camera.world_tolerance))
-        if len(points) >= 2:
-            pygame.draw.lines(surface, config.Color.SELECTION, False, points, 3)
+        outline = _carriageway_outline(camera, segment)
+        if len(outline) >= 3:
+            pygame.draw.polygon(
+                surface, config.Color.SELECTION, outline, 2
+            )
+            layer = self._layer_for(surface)
+            layer.fill((0, 0, 0, 0))
+            pygame.draw.polygon(
+                layer, (*config.Color.SELECTION, config.SELECTION_ALPHA), outline
+            )
+            layer.set_alpha(255)
+            surface.blit(layer, (0, 0))
 
     # -- the translucent layer --------------------------------------------
 
@@ -235,15 +244,7 @@ class EditorOverlay:
                 return
             if segment.is_broken:
                 return  # drawn as an error line already; nothing to wash
-            ribbon = build_ribbon(
-                segment.path,
-                segment.profile.extent_left,
-                -segment.profile.extent_right,
-                camera.world_tolerance,
-                s0=segment.trim_a,
-                s1=segment.path.length - segment.trim_b,
-            )
-            outline = to_screen_points(camera, ribbon.outline)
+            outline = _carriageway_outline(camera, segment)
             if len(outline) >= 3:
                 pygame.draw.polygon(layer, wash, outline)
                 pygame.draw.polygon(layer, config.Color.HOVER, outline, 2)
@@ -399,10 +400,6 @@ def _mark_beside(surface, color, camera: Camera, snap: Snap) -> None:
     pygame.draw.circle(surface, color, camera.to_screen(snap.position), 5, 1)
 
 
-def _mark_lane(surface, color, camera: Camera, snap: Snap) -> None:
-    pygame.draw.circle(surface, color, camera.to_screen(snap.position), 6, 2)
-
-
 def _mark_segment(surface, color, camera: Camera, snap: Snap) -> None:
     _cross(surface, color, camera.to_screen(snap.position), 7)  # "split here"
 
@@ -421,13 +418,27 @@ SNAP_MARKS: dict[SnapKind, Callable[..., None]] = {
     SnapKind.NODE: _mark_node,
     SnapKind.ANCHOR: _mark_anchor,
     SnapKind.BESIDE: _mark_beside,
-    SnapKind.LANE: _mark_lane,
     SnapKind.SEGMENT: _mark_segment,
     SnapKind.ANGLE: _mark_angle,
     SnapKind.GRID: _mark_grid,
 }
 """How each snap kind is marked. A new kind is one function and one line here,
 the same shape as `HANDLE_STYLES`."""
+
+
+def _carriageway_outline(camera: Camera, segment) -> list[tuple[float, float]]:
+    """The screen polygon of a road's carriageway between its trims."""
+    if segment.is_broken:
+        return []
+    ribbon = build_ribbon(
+        segment.path,
+        segment.profile.extent_left,
+        -segment.profile.extent_right,
+        camera.world_tolerance,
+        s0=segment.trim_a,
+        s1=segment.path.length - segment.trim_b,
+    )
+    return to_screen_points(camera, ribbon.outline)
 
 
 def _node_radius(network: RoadNetwork, node_id: int) -> float:

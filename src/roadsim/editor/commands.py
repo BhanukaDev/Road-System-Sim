@@ -75,6 +75,7 @@ class _SegmentState:
     control_points: tuple[Vec2, ...]
     profile: RoadProfile
     corner_radius: float
+    profile_b: RoadProfile | None = None
 
     @staticmethod
     def capture(segment: RoadSegment) -> _SegmentState:
@@ -85,6 +86,7 @@ class _SegmentState:
             tuple(segment.control_points),
             segment.profile,
             segment.corner_radius,
+            segment.profile_b,
         )
 
     def restore(self, network: RoadNetwork) -> RoadSegment:
@@ -95,6 +97,7 @@ class _SegmentState:
             self.profile,
             corner_radius=self.corner_radius,
             segment_id=self.id,
+            profile_b=self.profile_b,
         )
 
 
@@ -211,6 +214,8 @@ class AddSegment(Command):
     profile: RoadProfile
     corner_radius: float | None = None
     label: str = "draw road"
+    profile_b: RoadProfile | None = None
+    """Makes the segment a lane-change taper to this section at B (D26)."""
     _id: int | None = field(default=None, init=False, repr=False)
 
     def do(self, network: RoadNetwork) -> None:
@@ -221,6 +226,7 @@ class AddSegment(Command):
             self.profile,
             corner_radius=self.corner_radius,
             segment_id=self._id,
+            profile_b=self.profile_b,
         )
         self._id = segment.id
 

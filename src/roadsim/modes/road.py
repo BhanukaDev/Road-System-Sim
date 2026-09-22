@@ -74,7 +74,7 @@ class RoadMode(Mode):
         ]
 
     def _details(self, ctx: EditorContext) -> list[str]:
-        from ..editor.tools.select import describe
+        from ..editor.pick import describe
 
         if ctx.selection.is_empty:
             return ["# nothing selected"]

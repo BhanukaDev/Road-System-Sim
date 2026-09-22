@@ -24,7 +24,7 @@ from ..road.junction import Junction
 from ..road.lane import Direction, LaneType
 from ..road.median_taper import MedianTaper, median_tapers
 from ..road.pavement import build_pavement_bands
-from ..road.transition import build_transition
+from ..road.transition import build_taper, build_transition, carriageway_extents
 from ..road.turn_arrows import arrows_for_mouth
 from .camera import Camera
 from .crosswalk_renderer import draw_crosswalk
@@ -76,7 +76,12 @@ class NetworkRenderer:
             for c in network.caps.values()
             if node_ids is None or c.node_id in node_ids
         ]
-        drawable = [s for s in segments if not s.is_broken]
+        sound = [s for s in segments if not s.is_broken]
+        # A lane-change taper has no lanes of its own to ribbon - its edges run
+        # straight from one section to the other - so it is painted as a patch
+        # (D26) and left out of everything below that walks a segment's lanes.
+        lane_changes = [s for s in sound if s.is_transition]
+        drawable = [s for s in sound if not s.is_transition]
         tapers = {
             segment.id: median_tapers(
                 segment,
@@ -85,6 +90,9 @@ class NetworkRenderer:
             )
             for segment in drawable
         }
+
+        for segment in lane_changes:
+            self._draw_lane_change(surface, camera, segment)
 
         for layer in LAYERS:
             for segment in drawable:
@@ -174,6 +182,55 @@ class NetworkRenderer:
             if len(outline) < 3:
                 continue
             pygame.draw.polygon(surface, style.fill, outline)
+
+    def _draw_lane_change(
+        self, surface: pygame.Surface, camera: Camera, segment: RoadSegment
+    ) -> None:
+        """A taper between two sections: the pavement band tapering outside,
+        the carriageway tapering inside, and the lane lines carried across it
+        by `road/transition.py` - the same paint a two-arm junction of
+        differing profiles gets, on a patch whose length the user chose."""
+        start, end = segment.profile, segment.profile_b
+        frame_a = segment.end_frame(True)
+        frame_b = segment.end_frame(False)
+
+        def quad(left_a: float, right_a: float, left_b: float, right_b: float):
+            return to_screen_points(
+                camera,
+                [
+                    frame_a.position + frame_a.normal * left_a,
+                    frame_b.position + frame_b.normal * left_b,
+                    frame_b.position + frame_b.normal * right_b,
+                    frame_a.position + frame_a.normal * right_a,
+                ],
+            )
+
+        if start.lanes == end.lanes:
+            # The same lanes at both ends - only where they sit differs (a
+            # slide, D28) - so each lane is one quad in its own colour, and
+            # the taper reads as the plain road it is.
+            for layer in LAYERS:
+                for k, lane in enumerate(start.lanes):
+                    style = style_for(lane.type)
+                    if style.layer != layer:
+                        continue
+                    ring = quad(*start.lane_bounds(k), *end.lane_bounds(k))
+                    if len(ring) >= 3:
+                        pygame.draw.polygon(surface, style.fill, ring)
+        else:
+            paved = any(
+                lane.type is LaneType.SIDEWALK for lane in (*start.lanes, *end.lanes)
+            )
+            outer = quad(start.edges[0], start.edges[-1], end.edges[0], end.edges[-1])
+            if len(outer) >= 3:
+                fill = style_for(LaneType.SIDEWALK).fill if paved else config.Color.JOINT_FILL
+                pygame.draw.polygon(surface, fill, outer)
+            inner = quad(*carriageway_extents(start), *carriageway_extents(end))
+            if len(inner) >= 3:
+                pygame.draw.polygon(surface, config.Color.JOINT_FILL, inner)
+        transition = build_taper(segment)
+        if transition is not None:
+            draw_transition(surface, camera, transition)
 
     def _draw_cap(self, surface: pygame.Surface, camera: Camera, cap: Cap) -> None:
         if cap.kind is CapKind.TERMINAL:
@@ -276,7 +333,7 @@ class NetworkRenderer:
         away = 1.0 if at_a else -1.0
         s = segment.path.clamp_s(mark.stop_s + away * config.TURN_ARROW_SETBACK)
         frame = segment.path.sample(s)
-        profile = segment.profile
+        profile = segment.profile_at(at_a)
         for arrow in arrows_for_mouth(profile, at_a, junction, segment.id):
             decal = decal_for(arrow.kind.decal)
             lane_width = profile.lanes[arrow.lane].width

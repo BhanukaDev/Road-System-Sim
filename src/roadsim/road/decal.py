@@ -59,6 +59,53 @@ class Decal:
         ]
 
 
+def _u_turn_rings() -> tuple[tuple[Vec2, ...], ...]:
+    """A U-turn arrow, drawn rather than imported: the TPDM set has none.
+
+    A shaft up the driver's right, a half turn over the top to the left, and
+    a head pointing back the way the driver came. Built in an arbitrary size
+    and then normalised to the same frame as the library rings - centred,
+    +y along travel, exactly 1.0 long - so `placed` treats it like any other.
+    """
+    import math
+
+    half_gap, thickness = 0.19, 0.12
+    outer, inner = half_gap + thickness, half_gap
+    top = 0.1
+    ring: list[Vec2] = [Vec2(outer, -0.5), Vec2(outer, top)]
+    steps = 12
+    for i in range(1, steps):
+        angle = math.pi * i / steps
+        ring.append(Vec2(outer * math.cos(angle), top + outer * math.sin(angle)))
+    ring += [
+        Vec2(-outer, top),
+        Vec2(-outer, -0.2),
+        Vec2(-outer - 0.13, -0.2),
+        Vec2(-half_gap - thickness / 2.0, -0.5),
+        Vec2(-inner + 0.13, -0.2),
+        Vec2(-inner, -0.2),
+        Vec2(-inner, top),
+    ]
+    for i in range(steps - 1, 0, -1):
+        angle = math.pi * i / steps
+        ring.append(Vec2(inner * math.cos(angle), top + inner * math.sin(angle)))
+    ring += [Vec2(inner, top), Vec2(inner, -0.5)]
+
+    lo = min(p.y for p in ring)
+    hi = max(p.y for p in ring)
+    left = min(p.x for p in ring)
+    right = max(p.x for p in ring)
+    scale = 1.0 / (hi - lo)
+    mid_y = (hi + lo) / 2.0
+    mid_x = (left + right) / 2.0
+    return (tuple(Vec2((p.x - mid_x) * scale, (p.y - mid_y) * scale) for p in ring),)
+
+
+SYNTHESISED = {"arrow_u_turn": _u_turn_rings}
+"""Decals built from geometry rather than imported (D27). One line here is
+one new decal, the same as one line in `RINGS`."""
+
+
 def _build() -> dict[str, Decal]:
     decals = {
         name: Decal(
@@ -68,6 +115,10 @@ def _build() -> dict[str, Decal]:
         )
         for name, rings in RINGS.items()
     }
+    for name, make in SYNTHESISED.items():
+        rings = make()
+        xs = [p.x for ring in rings for p in ring]
+        decals[name] = Decal(name, rings, max(xs) - min(xs))
     for mirrored_name, source_name in MIRRORED.items():
         source = decals[source_name]
         decals[mirrored_name] = Decal(

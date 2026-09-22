@@ -80,7 +80,11 @@ def check(
     for nid in sorted(node_ids):
         junction = network.junctions.get(nid)
         if junction is not None and junction.is_degenerate:
-            return Problem("roads meet too shallowly to join here", junction.position)
+            return Problem(
+                "roads meet too shallowly to join here - join further from the"
+                " end of the road, or at a steeper angle",
+                junction.position,
+            )
     for sid in sorted(new_segment_ids):
         segment = network.segments.get(sid)
         if segment is None:

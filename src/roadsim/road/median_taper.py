@@ -86,8 +86,8 @@ def median_tapers(
     junction_b: Junction | None,
 ) -> tuple[MedianTaper, ...]:
     """One entry per median lane end that meets a real crossing."""
-    if segment.is_broken:
-        return ()
+    if segment.is_broken or segment.is_transition:
+        return ()  # a taper's median, if any, is already changing width
     out: list[MedianTaper] = []
     for lane_index in segment.profile.of_type(LaneType.MEDIAN):
         lane_width = segment.profile.lanes[lane_index].width

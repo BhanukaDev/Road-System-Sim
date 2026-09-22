@@ -24,6 +24,10 @@ lane of your own direction group, right from the rightmost" is true under both
 conventions. What changes is which of those edges is the kerb and which is the
 centreline, and the reversed lane order already says that.
 
+The one other reader is `road/transition.py` (D27), for a *one-way* road meeting
+a two-way one: a lone direction group has no opposite group to face, so
+handedness says which of its edges is the seam its lines pair outward from.
+
 Not stored in a save file, and it does not need to be: `serialization/schema.py`
 writes every `LaneSpec` in full, so a network keeps the handedness it was built
 with even if this flag later flips."""
@@ -110,10 +114,6 @@ SNAP_NODE_PX = 16.0
 """Snap radii are in *pixels*, converted through `camera.zoom`. A snap that gets
 harder to hit as you zoom out is a snap that is broken."""
 SNAP_SEGMENT_PX = 12.0
-SNAP_LANE_PX = 8.0
-"""Reach of a lane handle at a node - the tightest snap there is, because a
-road's lane and edge handles sit a lane's width apart and a loose radius would
-make picking a particular one a matter of luck."""
 SNAP_ANCHOR_PX = 10.0
 """Reach of a lane anchor - deliberately tighter than a plain segment snap, so
 it only wins when the cursor is genuinely lined up with that lane."""
@@ -217,6 +217,36 @@ TRANSITION_ARROW_LANE_FRACTION = TURN_ARROW_LANE_FRACTION
 reason: a marking that touches the lane line it is telling you to cross reads
 as the line being broken."""
 
+TRANSITION_TAPER_RATE = 4.0
+"""Metres of lane-change taper per metre of width change (D26). A road drawn
+on from the dead end of a road of another width gets a taper segment this long
+before it reaches its own full section; 4:1 is a gentle urban taper, and it is
+what decides where the second node lands."""
+
+TRANSITION_MAX_KINK_DEG = 30.0
+"""Degrees. A road drawn on from a dead end gets a lane-change taper only when
+it leaves within this angle of the old road's own line - when it *continues*
+it. Sharper than this it is a turn: the taper would be short, sit across a
+kink junction that trims it to nothing, and say nothing a plain junction of
+the two sections does not already say."""
+
+TRANSITION_MIN_SLIDE = 0.25
+"""Metres. An arrangement that would move a road less than this to one side is
+no arrangement - a road leaving nearly square on projects its arrangement to a
+few millimetres - and gets no slide for it."""
+
+TRANSITION_SLIDE_LENGTH = 60.0
+"""Metres. The most of a straight a *slide* taper takes - a taper between two
+copies of one section that differ only in where they are centred, which is how
+a road arranged to one side of the road it joins gets its own nodes back onto
+its own centre (D28). Invisible, so it may as well be long: it is the arm the
+junction trims, and a shallow gore wants some fifty metres of it."""
+
+TRANSITION_MIN_LENGTH = 8.0
+"""Metres. A taper shorter than this is a step, not a change: below it the
+draw tool refuses the join and says why. Also the least straight a road must
+leave a wide dead end with before its first bend, because a taper is straight."""
+
 TRANSITION_ARROW_SETBACK = 12.0
 """Metres back up its own road from the transition mouth. A merge arrow is an
 instruction to change lane, so it has to arrive with room to act on it."""
@@ -241,12 +271,30 @@ already there reads through it, solid enough that lane colours still mean
 something."""
 HOVER_ALPHA = 70
 """0-255. The wash over a road or node the cursor is about to act on."""
+SELECTION_ALPHA = 60
+"""0-255. The wash over the selected road's carriageway - the hover wash's
+shape in the selection colour, so lit and chosen read as one idea."""
 FOOTPRINT_ALPHA = 90
 """0-255. The disc of the active profile's width that follows the cursor
 before a first point is placed."""
 
 MIN_ROAD_LENGTH = 1.0
 """Metres. Shorter than this and there is no road, only a mistake."""
+AUTO_NODE_SPACING = 300.0
+"""Metres. A straight at least twice this long is cut into equal pieces, each
+between one and two spacings, with a node at each cut when a road is drawn
+(D24). One long stroke then becomes several selectable, deletable, movable
+roads instead of one, and every cut is a straight through-joint of one profile
+- never a corner, whose fillet stays whole inside its own piece - so the
+network draws exactly as it did before the cut.
+
+Deliberately long. A junction's trim can never reach past the far node of the
+piece it is on, and a shallow merge - an on-ramp at ten degrees - needs some
+fifty metres of gore on the piece *behind* the merge node. Cut a motorway
+every eighty metres and nearly every such merge lands too close to a cut to
+resolve; at this spacing only a genuinely long road is cut, and a piece is
+long enough to hold a gore anywhere but its first stretch. Ctrl+click in the
+draw tool cuts a road wherever a shorter piece is actually wanted."""
 MIN_LANE_CLEARANCE = 0.25
 """Metres of turning radius that must survive at a curve's innermost lane edge.
 
@@ -328,13 +376,10 @@ class Color:
     SNAP_SEGMENT = (120, 190, 226)
     SNAP_ANCHOR = (226, 190, 120)
     SNAP_BESIDE = (226, 160, 120)
-    SNAP_LANE = (140, 226, 214)
     SNAP_GRID = (140, 146, 158)
     SNAP_ANGLE = (226, 150, 220)
     GUIDE = (168, 120, 226)
 
-    HANDLE_LANE = (140, 226, 214)
-    HANDLE_EDGE = (108, 176, 170)
     HANDLE_CONTROL = (226, 168, 72)
     """An authoritative control point - the same colour as a node, because it is
     the same kind of thing: stored state the user put there."""

@@ -888,3 +888,193 @@ question (D21): the snap answers *where* the node goes and connects nothing.
 **What did not change.** `editor/lane_draw.py`'s solver, the datum-in-the-name
 rule (`RoadProfile.with_datum`), `SplitSegment`, and the ghost. The mid-road
 join is the node join plus a split the editor already knew how to make.
+
+## D24. One edit tool, hover and selection everywhere, and long roads in pieces
+
+**The symptom.** Five tools where the user saw three activities: draw a road,
+change a road, paint a profile. Selecting was a tool of its own, so seeing
+what a road was meant leaving the tool you were using; moving a node and
+reshaping a road were two tools that both start with "take hold of the thing
+under the cursor". And a road drawn as one long stroke was one segment, so
+deleting a short stretch of it deleted all of it.
+
+**One edit tool (`tools/edit_road.py`).** The press decides, most specific
+first: a shape handle of the selected road, then a node, then a road to
+select, then nothing. `MoveNodeTool` and `ShapeRoadTool` stay as the two
+drags, each still drivable alone from a test; the edit tool owns one of each
+and forwards to whichever the press started. The select tool is gone.
+
+**Hover and click-to-select belong to `Toolbox`, not to any tool.** Whatever
+is under the cursor is lit; a left click no tool consumed selects what it
+landed on. A tool that has something to say about the hover - the draw tool
+lighting the road it would split - says it in its own preview, and the toolbox
+only fills the silence. Picking (`editor/pick.py`) hits a road anywhere over
+its carriageway (`Snapper.over_segment`), not within a few pixels of its
+centreline, because "hover the road" means the asphalt; the selected road is
+washed the same way the hovered one is, in the selection colour.
+
+**A long stroke is several roads.** `build_road_command` cuts every straight
+that can hold two pieces of `config.AUTO_NODE_SPACING` into equal pieces with a
+node at each cut - only straights, never through a fillet, so every cut is a
+straight through-joint of one profile and the drawing does not change.
+Rounding *down* to whole spacings means a cut never leaves a piece shorter
+than the road would have been left uncut. Ctrl+click in the draw tool cuts a
+road by hand at the cursor's station, with the same `SplitSegment` a
+T-junction uses.
+
+**A cut road is still one road to its junctions - up to a point.** The trim
+budget that keeps a stub from being eaten by its own junction
+(`JUNCTION_MAX_TRIM_FRACTION`) was a fraction of the *segment's* length, so
+cutting a long road into pieces shrank the gore budget of every shallow ramp
+on it. `RoadNetwork.run_length` measures the run - the segment plus everything
+continuing straight through same-section joints beyond it - and
+`build_junction` takes those lengths in. But the trim itself still has to fit
+inside the piece it is on: a junction cannot reach past a node, even a
+through-joint one. A shallow on-ramp needs some fifty metres of gore on the
+piece *behind* its merge node, so a motorway cut every eighty metres refused
+nearly every such merge. `AUTO_NODE_SPACING` is therefore long - a road is
+cut only when it is genuinely long - and Ctrl+click is how a shorter piece is
+made where one is wanted. Letting a trim run through a joint into the next
+piece is the real fix, and belongs with the junction work still to come.
+
+## D25. A narrower road is arranged across a wider one by where the cursor is
+
+**The symptom.** D21's lane handles put six or eight small rings at every node
+and D23 put them along every road. They were hard to hit, said nothing when
+the two roads had the same width, and answered the wrong question: which of
+the wide road's lanes the narrow one lines up with is a *lateral offset*, and
+the cursor already has one.
+
+**Arrangements.** Across a road of width `W` a road of width `w` has `|W - w| /
+2` of room either side of centre. The offsets within that room at which a lane
+line of one lies on a lane line of the other are the arrangements
+(`editor/lane_draw.py:arrangements`); the kerb-hugging extremes are always
+among them. Equal widths have no room and no arrangements, and simply centre.
+
+**Chosen in the wide road's frame, applied in the new road's.** The first
+click across a road of another width records an `Attachment` - that road's
+centreline point and normal there. While the second point is placed, the
+cursor's lateral position across the wide road picks the nearest arrangement;
+the second click locks it. The datum is then solved in the new road's own end
+frame by projecting the body-centre target onto its normal: a road leaving
+along the wide road's tangent gets the arrangement exactly, one leaving square
+on gets zero - which is the right answer for a T, whose kerb is straight ahead
+of it rather than beside it. An end that finishes across a wider road is
+arranged by where across it the cursor landed. Before a first point, the
+footprint disc sits where the arranged body would be.
+
+**The road snap is the whole carriageway.** `Snapper.snap(..., over_body=True)`
+attaches anywhere over a road at the station under the cursor; the last metre
+of a road answers as its node. Lane handles, `SnapKind.LANE` and
+`road/lane_handle.py` are gone with nothing left that reads them.
+
+## D26. A lane change is a straight segment between two nodes
+
+**The symptom.** Two roads of different widths met at one node, and the
+junction there faked the width change over half a road-width: both roads
+gave up their mouths to a patch, neither was full size at the node, and the
+user could not say how long the change should take or where the narrow road
+began.
+
+**A taper segment.** `RoadSegment.profile_b` makes a segment a taper: `profile`
+at its A end, `profile_b` at its B end, lane edges running straight between
+the two. A taper is always straight - exactly two control points - so its
+edges are line segments between the two mouths and stay exact (D1). Every
+consumer that reads a section at an *end* - `SegmentEnd`, caps, anchors,
+pavement bands, crosswalks, turn arrows - reads `profile_at(at_a)`; the
+renderer paints a taper as a patch (`_draw_lane_change`) with the lines
+carried across it by `road/transition.py:build_taper`, and leaves it out of
+everything that walks a segment's lanes. It has no shape handles, cannot be
+split or repainted, and the draw tool refuses to join a road inside one.
+
+**When one is owed.** Where the stroke *continues* a road of another width
+from its dead end - two arms, one road. The draw tool puts the taper down
+first, `TRANSITION_TAPER_RATE` metres per metre of width change and never
+shorter than `TRANSITION_MIN_LENGTH`, clamped to the straight before the first
+bend (refused, with a reason, when there is none), and the road proper starts
+at a node beyond it. A branch - mid-road, or at a junction node - owes none:
+it is arranged by its datum and the junction's gore resolves it (D25), and a
+full-width stub tapering away from a crossing would be wrong. Two arms of
+differing profiles at a node nobody drew a taper at keep the derived junction
+patch as the fallback.
+
+**Through joints are physical.** `_is_through_joint` compared profile
+identity, which was wrong two ways round: two symmetric roads joined head to
+head are one road but had different orientations, and an asymmetric road
+joined head to head to itself has its wide side switching kerbs at the joint.
+`sections_run_through` orients each end's section as it leaves the node,
+mirrors one, and compares lanes and datum (`RoadProfile.same_section`) - so a
+taper continues the road it was drawn from without a seam, and a head-to-head
+asymmetric join is the lane change it is. Save files are version 2, with the
+optional `profile_b` key; version 1 loads unchanged.
+
+## D27. Lane lines pair by direction of travel, and a stranded direction turns back
+
+**The symptom.** The transition patch paired lines outward from each road's
+middle - the centre line, or the body centre. That is right only when both
+middles are seams between opposing traffic. A one-way road has no seam, so
+its divider was paired with a two-way road's centre line and a backward lane
+ran into a forward one; an asymmetric road's median is off its body centre,
+so its edges were paired a lane apart from a symmetric road's.
+
+**Direction groups.** Each profile is read as up to two `_Group`s - its
+forward lanes and its backward lanes - each with its boundaries ordered from
+the *seam* outward to the kerb. The seam is the side facing the opposite
+group; a lone group in a one-way road faces where the opposite group would be,
+which handedness decides (`config.DRIVE_ON_LEFT`, its second and last reader).
+Forward pairs with forward and backward with backward, line `k` with line `k`,
+seam first; a line whose partner edge carries no paint is a taper running out
+to the other road's kerb; a whole group with no counterpart runs every line
+out the same way. Offsets are used in each profile's own frame throughout -
+the pairing itself is the alignment, so the anchor arithmetic went.
+
+**The U-turn.** A direction that stops at the transition - a two-way road's
+lane flowing into a one-way road that only flows the other way - gets a U-turn
+decal on every one of its lanes where it ends, placed like the merge arrows
+and drawn by the same renderer. The decal is synthesised (`decal.SYNTHESISED`)
+because the imported set has none. It is paint, not a lane path: when vehicles
+arrive it becomes one, and it lives in `road/transition.py` where the lane
+graph will read it, rather than being a marking the traffic model has to
+rediscover.
+
+## D28. A road is centred on its own nodes; the arrangement lives in the taper
+
+**The symptom.** D25 arranged a narrower road across a wider one by giving
+the narrow road a datum: its centreline stayed on the line the user drew,
+through the wide road's centre, and its body sat to one side of that line
+for the whole length of the road. Every node on it - the far end, every cut,
+every corner handle - therefore sat off the middle of the road it belonged
+to, and a road arranged at both ends could honour only one of them.
+
+**The body is the road.** The narrow road's centreline is now the drawn path
+*offset* by the arrangement (`Path.offset`, exact), so the road is centred
+on its own nodes with a datum of zero. The lateral step between the attach
+node - the wide road's centre - and that body is taken up by a taper at the
+end, the same segment D26 introduced: at the attach node it carries the
+section the junction should see there (the road being continued, at a dead
+end; this road's own section set the arrangement to one side, at a branch),
+and at the body it carries this road's own section, centred. A *slide* - the
+same lanes at both ends, only centred elsewhere - is invisible on the
+ground, so it takes the whole straight it sits on up to
+`TRANSITION_SLIDE_LENGTH`: it is the arm the junction trims, and a shallow
+gore wants tens of metres of it. A width change keeps its 4:1 length.
+
+**Mouths face their roads, not the chord.** A taper whose ends are no longer
+in line has a chord skewed a few degrees from both roads, and a mouth laid
+square to that chord would meet its road with a step at every kerb.
+`RoadSegment.heading_a/heading_b` are derived at rebuild from the one road
+beyond each mouth (`RoadNetwork._refresh_headings`) - or, at a junction of
+several arms, from the taper's other mouth, since the body beyond it is a
+parallel offset of the line the branch was drawn along and the arrangement
+was measured in that heading. `frame_at` lays each mouth along its heading,
+`outgoing_dir` reports it, and a taper's kerb for the junction solver is the
+straight between its two mouths' edges (`kerb_line`), not an offset of the
+chord. Through joints either side of a taper therefore stay seamless, and a
+branch's junction sees exactly the arm D25 gave it.
+
+**Two ends, one body.** A road arranged at both ends is placed by its start;
+the end taper runs from wherever the body arrives to the road it joins. Two
+tapers that would overlap on a short straight share it, the slides giving
+way first (`_share_length`). A bend too soon after a join for the road to
+centre itself is refused with that reason - the same condition under which a
+width change already had no room.

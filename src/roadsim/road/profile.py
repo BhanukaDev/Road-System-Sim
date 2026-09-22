@@ -104,6 +104,14 @@ class RoadProfile:
             and lane.direction in (direction, Direction.BOTH)
         )
 
+    def same_section(self, other: RoadProfile) -> bool:
+        """The same tarmac: identical lanes in the same order and the same
+        datum, whatever the two are called. Names carry a mirror or datum
+        suffix (`mirrored`, `with_datum`) that says how a profile was reached,
+        not what it is, so equality of names is the wrong question when asking
+        whether two road ends meet flush."""
+        return self.lanes == other.lanes and abs(self.datum - other.datum) < 1e-9
+
     def mirrored(self) -> RoadProfile:
         """The same cross-section seen from the B -> A direction.
 

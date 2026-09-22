@@ -92,14 +92,15 @@ def _sidewalk_mouth(
 ) -> tuple[Vec2, Vec2, float] | None:
     """Outer/inner sidewalk points at one trimmed mouth, viewed from the node."""
     segment = seg_by_key[(end.segment_id, end.at_a)]
+    profile = segment.profile_at(end.at_a)
     profile_left = outgoing_left == end.at_a
-    lane_index = 0 if profile_left else len(segment.profile.lanes) - 1
-    lane = segment.profile.lanes[lane_index]
+    lane_index = 0 if profile_left else len(profile.lanes) - 1
+    lane = profile.lanes[lane_index]
     if lane.type is not LaneType.SIDEWALK:
         return None
     outer_index = 0 if profile_left else -1
     inner_index = 1 if profile_left else -2
     frame = segment.end_frame(end.at_a)
-    outer = frame.position + frame.normal * segment.profile.edges[outer_index]
-    inner = frame.position + frame.normal * segment.profile.edges[inner_index]
+    outer = frame.position + frame.normal * profile.edges[outer_index]
+    inner = frame.position + frame.normal * profile.edges[inner_index]
     return outer, inner, lane.width

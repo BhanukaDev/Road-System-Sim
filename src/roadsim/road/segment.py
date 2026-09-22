@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from .. import config
 from ..geometry import (
     ArcSegment,
+    LineSegment,
     Path,
     Ribbon,
     Sample,
@@ -40,10 +41,49 @@ class RoadSegment:
     """Corner-handle override for how far this end pulls back at a junction.
     `None` means derive it from the real kerb geometry, like `trim_a` itself."""
     pull_b: float | None = None
+    profile_b: RoadProfile | None = None
+    """Set on a *lane-change taper* (D26): the cross-section at the B end,
+    with `profile` then being the one at the A end and the lane edges running
+    straight between the two. `None` - the ordinary road - means the section is
+    `profile` from end to end.
+
+    A taper is always straight: exactly two control points, so its edges are
+    line segments between the two mouths and stay exact (D1). It is the stored
+    answer to "how long does the width change take", where a two-arm junction
+    of differing profiles is the derived one for a node nobody drew a taper at.
+    """
+    heading_a: Vec2 | None = field(default=None, repr=False)
+    heading_b: Vec2 | None = field(default=None, repr=False)
+    """DERIVED, tapers only: the direction each mouth faces, in the A -> B
+    sense, read off the road either side at rebuild (`RoadNetwork.
+    _refresh_headings`). A taper's two mouths need not be in line - the road
+    beyond it is centred on its own body, which the arrangement put to one
+    side of the road before it (D28) - so its chord is skewed a few degrees
+    from both roads, while each mouth still has to face its own road exactly
+    for the joint there to be seamless. `None`, or a taper left dangling,
+    falls back to the chord."""
     path: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.profile_b is not None and len(self.control_points) != 2:
+            raise ValueError(
+                f"segment {self.id} tapers between two profiles and must be a"
+                f" straight of two control points, not {len(self.control_points)}"
+            )
         self.refit()
+
+    # -- cross-section -----------------------------------------------------
+
+    @property
+    def is_transition(self) -> bool:
+        return self.profile_b is not None
+
+    def profile_at(self, at_a: bool) -> RoadProfile:
+        """The cross-section at one end - what a junction, cap or anchor at
+        that end must read, since a taper has two."""
+        if at_a or self.profile_b is None:
+            return self.profile
+        return self.profile_b
 
     # -- authoritative state ----------------------------------------------
 
@@ -153,12 +193,42 @@ class RoadSegment:
 
     def end_frame(self, at_a: bool) -> Sample:
         """Frame where the carriageway meets the junction. Tangent stays A -> B."""
-        return self.path.sample(self.end_s(at_a))
+        return self.frame_at(self.end_s(at_a), at_a)
+
+    def frame_at(self, s: float, at_a: bool) -> Sample:
+        """The frame at station `s`, facing the way the `at_a` mouth faces.
+
+        An ordinary road's frame is its path's. A taper's mouth faces the road
+        beyond it (`heading_a` / `heading_b`), which its skewed chord does not,
+        so its edges at either end are laid along that road's own normal and
+        meet it flush.
+        """
+        sample = self.path.sample(s)
+        heading = self.heading_a if at_a else self.heading_b
+        if not self.is_transition or heading is None:
+            return sample
+        return Sample(sample.s, sample.position, heading, 0.0)
 
     def outgoing_dir(self, at_a: bool) -> Vec2:
         """Unit direction leaving the node at that end, pointing *away* from it."""
-        tangent = self.path.sample(0.0 if at_a else self.path.length).tangent
+        tangent = self.frame_at(0.0 if at_a else self.path.length, at_a).tangent
         return tangent if at_a else -tangent
+
+    def kerb_line(self, left: bool) -> LineSegment:
+        """A taper's kerb: the straight from one mouth's edge to the other's.
+
+        Not `path.offset(extent)` - the two mouths have different sections,
+        and need not be in line, so a taper's kerb is not parallel to its chord
+        and is not at a constant offset from anything. It is exactly the line
+        between the two edge points, which is what the renderer fills and what
+        a junction next door has to trim against.
+        """
+        frame_a = self.frame_at(0.0, True)
+        frame_b = self.frame_at(self.path.length, False)
+        index = 0 if left else -1
+        start = frame_a.position + frame_a.normal * self.profile_at(True).edges[index]
+        end = frame_b.position + frame_b.normal * self.profile_at(False).edges[index]
+        return LineSegment(start, end)
 
     @property
     def carriageway_path(self) -> Path:

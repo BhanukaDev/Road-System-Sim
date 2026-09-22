@@ -1,11 +1,12 @@
-"""Drawing a road onto another road's lane (D21).
+"""Arranging a narrower road across a wider one by where the cursor is (D25).
 
-Two claims, kept apart on purpose. The solver (`editor/lane_draw.py`) answers
-"which datum puts my nearest lane on that handle" from a path and a handle
-alone, and is exact. The tool (`editor/tools/draw_road.py`) is the wiring:
-a lane handle beats every other snap, the road ends at the handle's *node*,
-and the profile it is built with is the shifted one - all with no window and
-no mouse, the same way `tests/test_tools.py` drives every other tool.
+Two claims, kept apart. The solver (`editor/lane_draw.py`) lists the
+arrangements two profiles admit, picks the one nearest a lateral, and turns it
+into a datum in the new road's own end frame - exactly. The tool
+(`editor/tools/draw_road.py`) is the wiring: the first click across a wider
+road records the attachment, the cursor's side while placing the second point
+chooses the arrangement, the second click locks it, and the road is built with
+the shifted profile - all with no window and no mouse.
 """
 
 from __future__ import annotations
@@ -13,212 +14,271 @@ from __future__ import annotations
 import pytest
 
 from roadsim.editor.context import EditorContext
-from roadsim.editor.handle import HandleKind
-from roadsim.editor.lane_draw import datum_for_lane_target, lane_candidates
-from roadsim.editor.snapping import SnapKind
+from roadsim.editor.lane_draw import (
+    Attachment,
+    arrangements,
+    attachment_for,
+    choose_arrangement,
+    datum_for_arrangement,
+    same_width,
+)
+from roadsim.editor.snapping import Snap, SnapKind
 from roadsim.editor.tools.draw_road import DrawRoadTool, build_road_command
 from roadsim.geometry import Vec2, fit_polyline
 from roadsim.render.camera import Camera
-from roadsim.road.lane_handle import LaneHandleKind, segment_end_handles
 from roadsim.road.network import RoadNetwork
-from roadsim.road.presets import AVENUE_FOUR_LANE, RESIDENTIAL_TWO_WAY
+from roadsim.road.presets import ALLEY, AVENUE_FOUR_LANE, RESIDENTIAL_TWO_WAY
 
-from .conftest import assert_vec
+from .conftest import EXACT, assert_vec
 
-RADIUS = 8.0
-
-
-def _handle(segment, node_id, at_a, kind, index):
-    return next(
-        h
-        for h in segment_end_handles(segment, node_id, at_a)
-        if h.kind is kind and h.index == index
-    )
+WIDE, NARROW = AVENUE_FOUR_LANE, RESIDENTIAL_TWO_WAY
+ROOM = (WIDE.total_width - NARROW.total_width) / 2.0
 
 
 @pytest.fixture
 def ctx() -> EditorContext:
-    """One 4-lane road running east, with nothing else in the world."""
+    """One 4-lane avenue running east from x=40 to x=120, nothing else."""
     network = RoadNetwork()
-    network.connect(Vec2(40.0, 0.0), Vec2(120.0, 0.0), AVENUE_FOUR_LANE)
+    network.connect(Vec2(40.0, 0.0), Vec2(120.0, 0.0), WIDE)
     network.rebuild_all()
     editor = EditorContext(network, Camera(zoom=10.0, viewport=(1440, 900)))
-    editor.select_profile(RESIDENTIAL_TWO_WAY.name)
+    editor.select_profile(NARROW.name)
     return editor
 
 
-# -- the solver ---------------------------------------------------------------
+# -- the solver -----------------------------------------------------------------
 
 
-def test_candidates_are_exactly_the_handles_a_node_publishes():
-    """What you can aim at and what can be matched are one list - otherwise a
-    handle could be offered that no datum can ever honour."""
-    offsets = set(lane_candidates(RESIDENTIAL_TWO_WAY))
-    network = RoadNetwork()
-    segment = network.connect(Vec2(0.0, 0.0), Vec2(50.0, 0.0), RESIDENTIAL_TWO_WAY)
-    published = {h.offset for h in segment_end_handles(segment, segment.node_a, True)}
-    assert offsets == published
+def test_equal_widths_have_no_arrangements():
+    assert same_width(NARROW, NARROW)
+    assert arrangements(NARROW, NARROW) == ()
+    assert choose_arrangement(NARROW, NARROW, 3.0) is None
 
 
-def test_datum_puts_the_nearest_lane_exactly_on_the_target():
-    """The whole claim, at the model level: after the shift, one of the new
-    road's own handles sits on the target handle to the last bit."""
-    network = RoadNetwork()
-    other = network.connect(Vec2(40.0, 0.0), Vec2(120.0, 0.0), AVENUE_FOUR_LANE)
-    network.rebuild_all()
-    target = _handle(other, other.node_a, True, LaneHandleKind.LANE, 3)
+def test_the_kerb_hugging_extremes_are_always_offered():
+    options = arrangements(WIDE, NARROW)
+    assert options[0] == pytest.approx(-ROOM, abs=EXACT)
+    assert options[-1] == pytest.approx(ROOM, abs=EXACT)
 
-    path = fit_polyline([Vec2(-40.0, 0.0), target.centre], RADIUS)
-    datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, False, target)
-    shifted = RESIDENTIAL_TWO_WAY.with_datum(datum)
 
-    frame = path.sample(path.length)
-    landed = [frame.position + frame.normal * o for o in lane_candidates(shifted)]
-    assert min(p.distance_to(target.position) for p in landed) == pytest.approx(
-        0.0, abs=1e-9
+def test_every_arrangement_puts_a_lane_line_on_a_lane_line_within_the_body():
+    for c in arrangements(WIDE, NARROW):
+        assert abs(c) <= ROOM + EXACT
+        lines = [edge - NARROW.datum + c for edge in NARROW.edges]
+        assert any(
+            abs(line - wide_line) < EXACT for line in lines for wide_line in WIDE.edges
+        )
+
+
+def test_arrangements_are_symmetric_for_symmetric_profiles():
+    options = arrangements(WIDE, NARROW)
+    assert options == pytest.approx(tuple(-c for c in reversed(options)), abs=EXACT)
+
+
+def test_the_cursor_picks_the_nearest_arrangement():
+    options = arrangements(WIDE, NARROW)
+    assert choose_arrangement(WIDE, NARROW, -100.0) == options[0]
+    assert choose_arrangement(WIDE, NARROW, 100.0) == options[-1]
+    for c in options:
+        assert choose_arrangement(WIDE, NARROW, c + 0.01) == c
+
+
+def test_the_datum_is_the_arrangement_when_the_road_continues_straight():
+    """Leaving along the wide road's own tangent, the target is exactly
+    beside the new road's end, so the datum is `c` to the last bit."""
+    attachment = Attachment(Vec2(0.0, 0.0), Vec2(0.0, 1.0), WIDE)
+    path = fit_polyline([Vec2(0.0, 0.0), Vec2(80.0, 0.0)], 12.0)
+    for c in arrangements(WIDE, NARROW):
+        assert datum_for_arrangement(path, True, attachment, c) == pytest.approx(c, abs=EXACT)
+
+
+def test_the_datum_is_zero_when_the_road_leaves_square_on():
+    """The target is then straight ahead, not beside: a T centres itself."""
+    attachment = Attachment(Vec2(0.0, 0.0), Vec2(0.0, 1.0), WIDE)
+    path = fit_polyline([Vec2(0.0, 0.0), Vec2(0.0, -80.0)], 12.0)
+    assert datum_for_arrangement(path, True, attachment, -ROOM) == pytest.approx(0.0, abs=EXACT)
+
+
+def test_the_datum_lands_the_body_centre_over_the_target_laterally():
+    attachment = Attachment(Vec2(0.0, 0.0), Vec2(0.0, 1.0), WIDE)
+    path = fit_polyline([Vec2(0.0, 0.0), Vec2(80.0, -20.0)], 12.0)
+    c = -ROOM
+    datum = datum_for_arrangement(path, True, attachment, c)
+    frame = path.sample(0.0)
+    body_centre = frame.position + frame.normal * datum
+    assert (body_centre - attachment.target(c)).dot(frame.normal) == pytest.approx(
+        0.0, abs=EXACT
     )
 
 
-def test_the_lane_it_picks_is_the_one_already_nearest():
-    """Nearest, not same-index: the two roads have different lane counts, so
-    an index means nothing across them."""
-    network = RoadNetwork()
-    other = network.connect(Vec2(40.0, 0.0), Vec2(120.0, 0.0), AVENUE_FOUR_LANE)
-    network.rebuild_all()
-    target = _handle(other, other.node_a, True, LaneHandleKind.LANE, 4)
-
-    path = fit_polyline([Vec2(-40.0, 0.0), target.centre], RADIUS)
-    datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, False, target)
-
-    # Target is left of centre in the new road's own frame (both run east), so
-    # the lane that moves onto it must be a left-hand one, not a right-hand.
-    frame = path.sample(path.length)
-    lateral = (target.position - frame.position).dot(frame.normal)
-    chosen = lateral - (datum - RESIDENTIAL_TWO_WAY.datum)
-    assert chosen == pytest.approx(
-        min(lane_candidates(RESIDENTIAL_TWO_WAY), key=lambda o: abs(o - lateral)),
-        abs=1e-9,
-    )
+# -- what a snap attaches to -----------------------------------------------------
 
 
-@pytest.mark.parametrize("at_a", [True, False])
-def test_either_end_of_the_new_road_can_be_the_one_that_joins(at_a):
-    network = RoadNetwork()
-    other = network.connect(Vec2(40.0, 0.0), Vec2(120.0, 0.0), AVENUE_FOUR_LANE)
-    network.rebuild_all()
-    target = _handle(other, other.node_a, True, LaneHandleKind.EDGE, 0)
-
-    far = Vec2(-40.0, 0.0)
-    points = [target.centre, far] if at_a else [far, target.centre]
-    path = fit_polyline(points, RADIUS)
-    datum = datum_for_lane_target(RESIDENTIAL_TWO_WAY, path, at_a, target)
-    shifted = RESIDENTIAL_TWO_WAY.with_datum(datum)
-
-    frame = path.sample(0.0 if at_a else path.length)
-    landed = [frame.position + frame.normal * o for o in lane_candidates(shifted)]
-    assert min(p.distance_to(target.position) for p in landed) == pytest.approx(
-        0.0, abs=1e-9
-    )
+def test_a_segment_snap_attaches_at_its_station_with_that_roads_frame(ctx):
+    road = ctx.network.segments[1]
+    snap = Snap(SnapKind.SEGMENT, Vec2(70.0, 0.0), (road.id, 30.0))
+    attachment = attachment_for(ctx.network, snap, NARROW)
+    assert attachment is not None
+    assert_vec(attachment.centre, Vec2(70.0, 0.0))
+    assert_vec(attachment.normal, Vec2(0.0, 1.0))
+    assert attachment.profile is WIDE
 
 
-# -- the tool -----------------------------------------------------------------
+def test_a_node_snap_attaches_with_the_frame_of_a_road_of_another_width(ctx):
+    node = ctx.network.node_at(Vec2(40.0, 0.0))
+    snap = Snap(SnapKind.NODE, node.position, node.id)
+    attachment = attachment_for(ctx.network, snap, NARROW)
+    assert attachment is not None
+    assert_vec(attachment.centre, node.position)
+    assert abs(attachment.normal.dot(Vec2(0.0, 1.0))) == pytest.approx(1.0, abs=EXACT)
 
 
-def test_a_lane_handle_beats_every_other_snap(ctx):
-    segment = ctx.network.segments[1]
-    target = _handle(segment, segment.node_a, True, LaneHandleKind.LANE, 4)
-
-    snap = DrawRoadTool()._snap_world(ctx, target.position)
-    assert snap.kind is SnapKind.LANE
-    assert snap.lane_handle.index == 4
-
-
-def test_a_lane_snap_lands_the_road_on_the_node_not_the_handle(ctx):
-    segment = ctx.network.segments[1]
-    target = _handle(segment, segment.node_a, True, LaneHandleKind.LANE, 4)
-
-    snap = DrawRoadTool()._snap_world(ctx, target.position)
-    assert_vec(snap.attach_position, ctx.network.nodes[segment.node_a].position)
-    assert snap.attach_node_id == segment.node_a
+def test_nothing_to_attach_to_when_widths_match_or_the_snap_is_free(ctx):
+    road = ctx.network.segments[1]
+    snap = Snap(SnapKind.SEGMENT, Vec2(70.0, 0.0), (road.id, 30.0))
+    assert attachment_for(ctx.network, snap, WIDE) is None
+    assert attachment_for(ctx.network, Snap(SnapKind.GRID, Vec2(0.0, 0.0)), NARROW) is None
+    assert attachment_for(ctx.network, None, NARROW) is None
 
 
-def test_drawing_onto_a_lane_joins_that_node_and_shifts_the_profile(ctx):
-    segment = ctx.network.segments[1]
-    target = _handle(segment, segment.node_a, True, LaneHandleKind.LANE, 4)
+# -- the tool -------------------------------------------------------------------
+
+
+def test_the_first_click_across_a_wider_road_records_the_attachment(ctx):
     tool = DrawRoadTool()
+    tool.place(ctx, Vec2(70.0, -6.0))  # over the avenue, south of centre
+    assert tool.start_attachment is not None
+    assert tool.arrangement is None  # not chosen yet
+    assert_vec(tool.points[0], Vec2(70.0, 0.0))  # the road ends on the centreline
 
-    start = tool._snap_world(ctx, Vec2(-60.0, 0.0))
-    end = tool._snap_world(ctx, target.position)
-    command = build_road_command(
-        ctx, [start.attach_position, end.attach_position], start, end
+
+def test_the_cursor_side_chooses_the_arrangement_until_the_second_click(ctx):
+    node = ctx.network.node_at(Vec2(40.0, 0.0))
+    tool = DrawRoadTool()
+    tool.place(ctx, node.position)
+    below = tool.start_arrangement(ctx, Vec2(0.0, -30.0))
+    above = tool.start_arrangement(ctx, Vec2(0.0, 30.0))
+    assert below is not None and above is not None
+    assert below == -above
+    assert abs(below) == pytest.approx(ROOM, abs=EXACT)
+
+    tool.place(ctx, Vec2(-40.0, -30.0))  # locks the side the cursor was on
+    assert tool.arrangement == below
+    assert tool.start_arrangement(ctx, Vec2(0.0, 30.0)) == below  # no longer live
+
+
+def test_a_road_continuing_a_wider_road_is_built_hugging_the_chosen_kerb(ctx):
+    """The whole claim end to end: continue the avenue westward from its end
+    node with the cursor south of it, and the narrow road's right kerb lies
+    exactly on the avenue's right kerb - beyond the taper that joins them
+    (D26), which is why the road proper starts at a node of its own."""
+    node = ctx.network.node_at(Vec2(40.0, 0.0))
+    tool = DrawRoadTool()
+    tool.place(ctx, node.position)
+    tool.place(ctx, Vec2(-40.0, -30.0))  # well south: the kerb-hugging extreme
+    tool.points[-1] = Vec2(-40.0, 0.0)  # keep the leave exactly straight
+    tool._commit(ctx)
+    ctx.network.rebuild_dirty()
+
+    new = next(
+        s
+        for s in ctx.network.segments.values()
+        if s.profile.lanes == NARROW.lanes and not s.is_transition
     )
+    assert node.id not in (new.node_a, new.node_b)  # the taper sits between
+    frame = new.path.sample(0.0)
+    right_kerb = frame.position - frame.normal * new.profile.extent_right
+    left_kerb = frame.position + frame.normal * new.profile.extent_left
+    kerbs = sorted((right_kerb.y, left_kerb.y))
+    assert kerbs[0] == pytest.approx(-WIDE.extent_right, abs=EXACT)
+    assert ctx.history.depth == 1
+
+
+def test_a_road_of_the_same_width_centres_and_keeps_its_name(ctx):
+    ctx.select_profile(WIDE.name)
+    node = ctx.network.node_at(Vec2(40.0, 0.0))
+    tool = DrawRoadTool()
+    tool.place(ctx, node.position)
+    tool.place(ctx, Vec2(-40.0, -30.0))
+    tool._commit(ctx)
+    new = next(s for s in ctx.network.segments.values() if s.id != 1)
+    assert new.profile.name == WIDE.name
+    assert new.profile.datum == pytest.approx(0.0, abs=EXACT)
+
+
+def test_finishing_across_a_wider_road_arranges_by_where_the_cursor_landed(ctx):
+    tool = DrawRoadTool()
+    start = tool.place(ctx, Vec2(-40.0, 0.0))  # arriving straight along the avenue
+    end = tool.place(ctx, Vec2(70.0, -ROOM))  # over the avenue, south side
+    assert end.kind is SnapKind.SEGMENT
+    c = tool.end_arrangement(ctx, end, Vec2(70.0, -ROOM))
+    assert c == pytest.approx(-ROOM, abs=EXACT)
+    command = build_road_command(ctx, list(tool.points), start, end, None, c)
     ctx.apply(command)
     ctx.network.rebuild_dirty()
-
-    new = next(s for s in ctx.network.segments.values() if s.id != segment.id)
-    assert new.node_b == segment.node_a  # one shared node, no new one beside it
-    assert new.profile.datum != pytest.approx(0.0, abs=1e-9)
-
-    frame = new.path.sample(new.path.length)
-    landed = [frame.position + frame.normal * o for o in lane_candidates(new.profile)]
-    assert min(p.distance_to(target.position) for p in landed) == pytest.approx(
-        0.0, abs=1e-9
+    # The road stays centred on its own nodes (D28); the arrangement is the
+    # datum at the taper's mouth on the avenue.
+    road = next(
+        s
+        for s in ctx.network.segments.values()
+        if s.profile.lanes == NARROW.lanes and not s.is_transition
     )
+    taper = next(s for s in ctx.network.segments.values() if s.is_transition)
+    assert road.profile.datum == pytest.approx(0.0, abs=EXACT)
+    assert taper.profile_b.datum == pytest.approx(-ROOM, abs=EXACT)
 
 
-def test_drawing_onto_a_lane_is_one_undo_step(ctx):
-    segment = ctx.network.segments[1]
-    target = _handle(segment, segment.node_a, True, LaneHandleKind.LANE, 4)
+def test_both_ends_arranged_gives_a_centred_road_placed_by_its_start(ctx):
+    """One road, two arrangements: the body sits where the start's
+    arrangement puts it and stays centred on its own nodes; each end's taper
+    then runs from that body to the road it joins, whatever that road's
+    section (D28, keeping the start-wins rule of D25)."""
+    ctx.network.connect(Vec2(-120.0, 0.0), Vec2(-40.0, 0.0), ALLEY)  # narrower still
+    ctx.network.rebuild_all()
     tool = DrawRoadTool()
-    start = tool._snap_world(ctx, Vec2(-60.0, 0.0))
-    end = tool._snap_world(ctx, target.position)
-
-    before = len(ctx.network.segments)
-    ctx.apply(build_road_command(ctx, [start.attach_position, end.attach_position], start, end))
+    west = ctx.network.node_at(Vec2(-40.0, 0.0))
+    east = ctx.network.node_at(Vec2(40.0, 0.0))
+    start = Snap(SnapKind.NODE, west.position, west.id)
+    end = Snap(SnapKind.NODE, east.position, east.id)
+    start_c = tool.end_arrangement(ctx, start, Vec2(-40.0, 3.0))
+    end_c = tool.end_arrangement(ctx, end, Vec2(40.0, -30.0))
+    assert start_c is not None and end_c is not None
+    command = build_road_command(ctx, [west.position, east.position], start, end, start_c, end_c)
+    ctx.apply(command)
     ctx.network.rebuild_dirty()
-    assert len(ctx.network.segments) == before + 1
+    tapers = sorted(
+        (s for s in ctx.network.segments.values() if s.is_transition),
+        key=lambda s: s.path.start.position.x,
+    )
+    assert len(tapers) == 2
+    first, last = tapers
+    assert first.profile.same_section(ALLEY)  # from the alley's own section ...
+    assert first.path.end.position.y == pytest.approx(start_c, abs=EXACT)  # ... to the body
+    assert last.profile_b.same_section(WIDE)  # and out to the avenue's
+    assert last.profile.datum == pytest.approx(0.0, abs=EXACT)
+    road = next(
+        s
+        for s in ctx.network.segments.values()
+        if s.profile.lanes == NARROW.lanes and not s.is_transition
+    )
+    assert road.profile.datum == pytest.approx(0.0, abs=EXACT)
 
-    ctx.undo()
-    ctx.network.rebuild_dirty()
-    assert len(ctx.network.segments) == before
-    assert ctx.history.depth == 0
 
-
-def test_a_road_drawn_nowhere_near_a_lane_keeps_the_plain_profile(ctx):
+def test_hovering_a_wider_road_moves_the_footprint_to_the_arranged_body(ctx):
     tool = DrawRoadTool()
-    start = tool._snap_world(ctx, Vec2(-200.0, -200.0))
-    end = tool._snap_world(ctx, Vec2(-200.0, -120.0))
-    ctx.apply(build_road_command(ctx, [start.position, end.position], start, end))
-
-    new = next(s for s in ctx.network.segments.values() if s.id != 1)
-    assert new.profile.name == RESIDENTIAL_TWO_WAY.name
-    assert new.profile.datum == pytest.approx(0.0, abs=1e-9)
-
-
-# -- preview ------------------------------------------------------------------
+    tool._raw = Vec2(70.0, -6.0)
+    tool._hover = tool._snap_world(ctx, tool._raw)
+    ctx.cursor = tool._hover.position
+    preview = tool.preview(ctx)
+    assert preview.footprint is not None
+    assert preview.footprint.x == pytest.approx(70.0, abs=EXACT)
+    assert preview.footprint.y == pytest.approx(-ROOM, abs=EXACT)
+    assert preview.handles == []
 
 
-def test_hovering_a_node_offers_its_lane_and_edge_handles(ctx):
+def test_hovering_open_space_keeps_the_footprint_under_the_cursor(ctx):
     tool = DrawRoadTool()
-    ctx.cursor = ctx.network.nodes[ctx.network.segments[1].node_a].position
-
-    kinds = {h.kind for h in tool.preview(ctx).handles}
-    assert kinds == {HandleKind.LANE, HandleKind.EDGE}
-
-
-def test_the_handle_being_aimed_at_is_the_active_one(ctx):
-    segment = ctx.network.segments[1]
-    target = _handle(segment, segment.node_a, True, LaneHandleKind.LANE, 4)
-    tool = DrawRoadTool()
-    tool._hover = tool._snap_world(ctx, target.position)
-    ctx.cursor = tool._hover.attach_position
-
-    active = [h for h in tool.preview(ctx).handles if h.active]
-    assert len(active) == 1
-    assert_vec(active[0].position, target.position)
-
-
-def test_no_handles_far_from_every_node(ctx):
-    tool = DrawRoadTool()
-    ctx.cursor = Vec2(-500.0, 500.0)
-    assert tool.preview(ctx).handles == []
+    tool._raw = Vec2(0.0, 300.0)
+    tool._hover = tool._snap_world(ctx, tool._raw)
+    ctx.cursor = tool._hover.position
+    assert tool.preview(ctx).footprint == ctx.cursor

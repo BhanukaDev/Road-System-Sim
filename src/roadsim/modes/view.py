@@ -11,7 +11,7 @@ from __future__ import annotations
 import pygame
 
 from ..editor.context import EditorContext, Selection
-from ..editor.tools.select import describe_selection, pick
+from ..editor.pick import describe_selection, pick
 from ..render.camera import Camera
 from ..render.curves import to_screen_points
 from ..ui.panel import Panel

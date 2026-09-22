@@ -20,7 +20,6 @@ from .. import config
 from ..geometry import Vec2
 from ..render.camera import Camera
 from ..road.anchor import Anchor, node_anchors
-from ..road.lane_handle import LaneHandle, node_lane_handles, segment_lane_handles
 from ..road.network import RoadNetwork
 from ..road.profile import RoadProfile
 
@@ -43,19 +42,15 @@ class SnapKind(Enum):
     what makes two roads run parallel - a ramp beside its motorway, a service
     road beside an avenue - without the user reading widths off the screen
     (D23). Only offered when the caller says what is being placed (`snap()`'s
-    `beside`), because "flush" has no meaning without a width."""
-    LANE = "lane"
-    """A lane or lane-edge handle, at a node or along a road. Payload: the
-    `LaneHandle`.
-
-    A real connection, not an aid: a road drawn onto one ends at that handle's
-    node - splitting the road there first when the handle is along it - and is
-    shifted so the chosen lane lines up (`editor/lane_draw.py`, D21, D23).
-    Asked for explicitly by the tools that can act on one, never through
-    `snap()` - offering it to every tool would mean each of them deciding what
-    a lane means to it, which is the branch a registry exists to avoid."""
+    `beside`), because "alongside" has no meaning without a width."""
     SEGMENT = "segment"
-    """Split there and connect. Payload: (segment id, arc length)."""
+    """Split there and connect. Payload: (segment id, arc length).
+
+    Found within a few pixels of the centreline, or - when the caller asks
+    for `over_body` - anywhere over the carriageway (D25): a road drawn onto
+    another attaches at the centreline station under the cursor, and *where*
+    across the road the cursor was decides how the two arrange
+    (`editor/lane_draw.py`)."""
     ANGLE = "angle"
     """Constrained to a fixed angle from the previous point."""
     GRID = "grid"
@@ -87,13 +82,7 @@ class Snap:
 
     @property
     def segment_hit(self) -> tuple[int, float] | None:
-        """The road a road drawn to this snap would split, and where. A `LANE`
-        snap along a road names one as surely as a `SEGMENT` snap does."""
-        if self.kind is SnapKind.SEGMENT:
-            return self.payload
-        if self.kind is SnapKind.LANE and self.payload.node_id is None:
-            return (self.payload.segment_id, self.payload.station)
-        return None
+        return self.payload if self.kind is SnapKind.SEGMENT else None
 
     @property
     def anchor(self) -> Anchor | None:
@@ -102,32 +91,6 @@ class Snap:
     @property
     def beside(self) -> Beside | None:
         return self.payload if self.kind is SnapKind.BESIDE else None
-
-    @property
-    def lane_handle(self) -> LaneHandle | None:
-        return self.payload if self.kind is SnapKind.LANE else None
-
-    @property
-    def attach_node_id(self) -> int | None:
-        """The node a road drawn to this snap should end at, if any. A `LANE`
-        snap at a node names one as surely as a `NODE` snap does - it is a node
-        plus the lane that was pointed at. One along a road names none yet: the
-        split will make it."""
-        if self.kind is SnapKind.NODE:
-            return self.payload
-        if self.kind is SnapKind.LANE:
-            return self.payload.node_id
-        return None
-
-    @property
-    def attach_position(self) -> Vec2:
-        """Where a road drawn to this snap actually ends. Everything but a
-        `LANE` snap ends where it points; a lane handle ends at its *centre* -
-        the node, or the split point - with the lane honoured by the profile's
-        datum instead (D21)."""
-        if self.kind is SnapKind.LANE:
-            return self.payload.centre
-        return self.position
 
     @property
     def is_free(self) -> bool:
@@ -153,10 +116,14 @@ class Snapper:
         ignore_nodes: frozenset[int] = frozenset(),
         ignore_segments: frozenset[int] = frozenset(),
         beside: tuple[RoadProfile, ...] = (),
+        over_body: bool = False,
     ) -> Snap:
         """`beside` names the cross-section(s) being placed at `point`, so a
-        `BESIDE` snap can put their kerb against a neighbouring road's. Empty
-        means the caller is placing a bare point and that snap is skipped."""
+        `BESIDE` snap can put their kerb a verge from a neighbouring road's.
+        Empty means the caller is placing a bare point and that snap is
+        skipped. `over_body` widens the road snap from the centreline to the
+        whole carriageway - what a tool that *attaches* to a road wants, and
+        what a tool that merely places a point near one does not."""
         node = self.nearest_node(point, ignore_nodes)
         if node is not None:
             return node
@@ -166,7 +133,8 @@ class Snapper:
         flush = self.nearest_beside(point, beside, ignore_segments)
         if flush is not None:
             return flush
-        segment = self.nearest_segment(point, ignore_segments)
+        find = self.over_segment if over_body else self.nearest_segment
+        segment = find(point, ignore_segments)
         if segment is not None:
             return segment
         if constrain_angle and from_point is not None:
@@ -263,61 +231,44 @@ class Snapper:
                         best, best_d = Snap(SnapKind.BESIDE, position, hit), d
         return best
 
-    def nearest_lane_handle(
-        self,
-        point: Vec2,
-        ignore_nodes: frozenset[int] = frozenset(),
-        ignore_segments: frozenset[int] = frozenset(),
+    def over_segment(
+        self, point: Vec2, ignore: frozenset[int] = frozenset()
     ) -> Snap | None:
-        """The nearest lane or edge handle - at a node, or along a road.
-
-        Not part of `snap()`'s chain (see `SnapKind.LANE`); a tool calls this
-        directly, the same way `nearest_node` and `nearest_anchor` already are.
-
-        At a node the reach is `SNAP_LANE_PX`, tight, because the handles sit
-        a lane apart and the node itself is the alternative. Along a road the
-        whole carriageway is the target: anywhere over the body - or within
-        reach outside its kerbs - picks the nearest lane line at the station
-        the cursor projects to, so hovering a road always names a lane rather
-        than falling through to a bare grid point between two of them. The
-        node's handles keep a node's own snap reach of either end to
-        themselves: two sets a few pixels apart would fight over the cursor,
-        and a split that close to a node would leave a stub with no
-        carriageway in it anyway.
-        """
-        reach = self.world_radius(config.SNAP_LANE_PX)
+        """The road whose carriageway `point` is over, as a `SEGMENT` snap at
+        the station it projects to - what hovering, picking and attaching mean
+        by "the road" (D24, D25). `nearest_segment` is the centreline within a
+        few pixels; this is the asphalt, plus the same few pixels outside its
+        kerbs, and the narrowest road wins where two overlap because it is
+        the one you could not have meant to miss."""
+        slack = self.world_radius(config.SNAP_SEGMENT_PX)
         best: Snap | None = None
-        best_d = reach
-        for node in self.network.nodes.values():
-            if node.id in ignore_nodes:
-                continue
-            for handle in node_lane_handles(self.network, node.id):
-                if handle.segment_id in ignore_segments:
-                    continue
-                d = handle.position.distance_to(point)
-                if d <= best_d:
-                    best, best_d = Snap(SnapKind.LANE, handle.position, handle), d
-        if best is not None:
-            return best
-        end_zone = self.world_radius(config.SNAP_NODE_PX)
-        best_d = float("inf")
+        best_width = float("inf")
         for segment in self.network.segments.values():
-            if segment.id in ignore_segments:
+            if segment.id in ignore:
                 continue
             path = segment.path
-            s = path.project(point)
-            if s < end_zone or s > path.length - end_zone:
-                continue
-            frame = path.sample(s)
+            frame = path.sample(path.project(point))
             delta = point - frame.position
-            if abs(delta.dot(frame.tangent)) > reach:
-                continue  # projection clamped to an end: not over this road
-            if abs(delta.dot(frame.normal)) > segment.profile.half_width + reach:
-                continue  # beside the road, not over it
-            for handle in segment_lane_handles(segment, s):
-                d = handle.position.distance_to(point)
-                if d <= best_d:
-                    best, best_d = Snap(SnapKind.LANE, handle.position, handle), d
+            if abs(delta.dot(frame.tangent)) > slack:
+                continue
+            lateral = delta.dot(frame.normal)
+            profile = segment.profile
+            if not (-profile.extent_right - slack <= lateral <= profile.extent_left + slack):
+                continue
+            if profile.total_width < best_width:
+                best_width = profile.total_width
+                best = Snap(SnapKind.SEGMENT, frame.position, (segment.id, frame.s))
+        if best is not None:
+            # The last metre of a road is its node: a split there would leave
+            # a stub with no road in it, and the node is what was meant.
+            segment = self.network.segments[best.segment_hit[0]]
+            s = best.segment_hit[1]
+            if s <= config.MIN_ROAD_LENGTH:
+                node = self.network.nodes[segment.node_a]
+                return Snap(SnapKind.NODE, node.position, node.id)
+            if s >= segment.path.length - config.MIN_ROAD_LENGTH:
+                node = self.network.nodes[segment.node_b]
+                return Snap(SnapKind.NODE, node.position, node.id)
         return best
 
     def nearest_segment(

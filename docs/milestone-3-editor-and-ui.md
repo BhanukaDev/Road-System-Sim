@@ -420,15 +420,24 @@ Six things were brought forward or found while building, and are recorded in
   and a radius drag one - `round_radius` onto `config.RADIUS_LADDER`. The
   three never actually compete: the radius snap acts on a scalar an `ARC_END`
   handle alone reaches, never a point the other two share.
-- **Lanes joined anywhere along a road, and roads laid alongside (D23).**
-  `road/lane_handle.py` builds a handle at any station; the draw tool shows a
-  road's lanes at the cursor's station and a click there splits the road and
-  joins by that lane, so a ramp leaves a motorway from its outer kerb rather
-  than its centreline. The footprint disc moves to where the shifted body will
-  be. `SnapKind.BESIDE` (`Snapper.snap(..., beside=profiles)`) pulls a free
-  point parallel to a neighbouring road, `config.BESIDE_GAP` between kerbs,
-  for both the draw tool and the move tool - an alignment aid like an anchor,
-  never a connection.
+- **Roads laid alongside (D23).** `SnapKind.BESIDE`
+  (`Snapper.snap(..., beside=profiles)`) pulls a free point parallel to a
+  neighbouring road, `config.BESIDE_GAP` between kerbs, for both the draw tool
+  and the edit tool - an alignment aid like an anchor, never a connection.
+- **Three tools, hover and selection everywhere, long roads in pieces (D24).**
+  `tools/edit_road.py` merges select, move and shape; `Toolbox` lights what is
+  under the cursor and selects what an unconsumed click lands on; long strokes
+  are cut at `AUTO_NODE_SPACING` and Ctrl+click cuts by hand; junction trim
+  budgets follow the run of through-joints.
+- **Arrangement by cursor side (D25).** A narrower road across a wider one is
+  placed by where the cursor is across it - no lane handles - and the road
+  snap is the whole carriageway.
+- **Lane-change tapers (D26).** `RoadSegment.profile_b`; a straight segment
+  between two real nodes, put down by the draw tool when a road of another
+  width is continued from a dead end. Through joints are compared physically.
+- **Direction-aware transition paint and the U-turn (D27).** Lines pair
+  forward with forward and backward with backward from the seam outward; a
+  stranded direction gets a U-turn on every lane.
 
 Stop lines and turn decals also stopped spanning the whole carriageway: both now
 cover the approach half of a mouth only. Handedness arrived as

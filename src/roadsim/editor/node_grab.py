@@ -7,12 +7,11 @@ so a grab touches undo, redo and serialization not at all.
 
 **A node is grabbed by its centre and nothing else (D21).** Lane handles were
 briefly offered here too, so that dropping one lane on another connected two
-roads; they now belong to `tools/draw_road.py`, where a road is *built* onto a
-chosen lane in the same stroke that draws it. Moving a node is about where it
-sits, so the move tool asks one question and gets one answer - and a node
-carrying six or eight rings while you only wanted to nudge it said otherwise.
-`road/lane_handle.py` and `editor/lane_connect.py` are unchanged; only who
-calls them moved.
+roads; the alignment question moved to `tools/draw_road.py`, where a road is
+*built* across a chosen part of another road in the same stroke that draws it
+(D25). Moving a node is about where it sits, so the move tool asks one
+question and gets one answer - and a node carrying six or eight rings while
+you only wanted to nudge it said otherwise.
 """
 
 from __future__ import annotations

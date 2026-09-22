@@ -38,7 +38,7 @@ def end_anchors(segment: RoadSegment, at_a: bool) -> tuple[Anchor, ...]:
     A sidewalk or median has nothing to continue as a road of its own, so only
     `carries_vehicles` lanes get one.
     """
-    profile = segment.profile
+    profile = segment.profile_at(at_a)
     frame = segment.end_frame(at_a)
     # `outgoing_dir` points *into* this segment (what a junction wants); an
     # anchor wants the opposite - continuing past the dead end, away from it.

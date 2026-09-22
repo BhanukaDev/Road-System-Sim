@@ -2,9 +2,9 @@
 
 Handles are published only for the *selected* road - selecting one changes
 nothing about it, so a save file of a road you only looked at is
-byte-identical (`road/shape_handle.py`). A click with no handle under it falls
-through to `tools/select.py:pick`, so this tool is also how you select a road
-in the first place.
+byte-identical (`road/shape_handle.py`). Since D24 this is one half of
+`tools/edit_road.py`, which decides what a press lands on; `grab` here answers
+only "is there a shape handle of the selected road under this point".
 
 **A `CONTROL` or `ARC_MID` handle moves an existing control point; a
 `STRAIGHT_MID` one materialises a new one first** (`shape_handle.materialise`)
@@ -48,7 +48,6 @@ from ..curve_snap import SnapRequest, round_radius, snap_curve
 from ..handle import HandleKind, PreviewHandle
 from ..modifiers import Modifiers
 from ..tool import Tool
-from .select import pick
 
 _HANDLE_KIND = {
     ShapeHandleKind.CONTROL: HandleKind.CONTROL,
@@ -95,7 +94,7 @@ class ShapeRoadTool(Tool):
 
     def handle_event(self, event: pygame.event.Event, ctx: EditorContext) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            return self.press(ctx, ctx.world(*event.pos))
+            return self.grab(ctx, ctx.world(*event.pos))
         if event.type == pygame.MOUSEMOTION:
             ctx.cursor = ctx.world(*event.pos)
             if self.drag is None:
@@ -112,12 +111,6 @@ class ShapeRoadTool(Tool):
         return False
 
     # -- picking and grabbing -----------------------------------------------
-
-    def press(self, ctx: EditorContext, point: Vec2) -> bool:
-        if self.grab(ctx, point):
-            return True
-        ctx.select(pick(ctx, point))
-        return True
 
     def grab(self, ctx: EditorContext, point: Vec2) -> bool:
         segment_id = ctx.selection.segment

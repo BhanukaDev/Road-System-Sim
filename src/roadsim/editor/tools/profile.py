@@ -27,10 +27,13 @@ class ProfileTool(Tool):
         return False
 
     def paint(self, ctx: EditorContext, point: Vec2) -> bool:
-        snap = ctx.snapper.nearest_segment(point)
-        if snap is None:
-            return False
+        snap = ctx.snapper.over_segment(point)
+        if snap is None or snap.segment_hit is None:
+            return False  # nothing, or the node at a road's end: not a road to paint
         segment_id, _ = snap.segment_hit
+        if ctx.network.segments[segment_id].is_transition:
+            ctx.status = "a lane change takes its sections from the roads either side"
+            return True
         if ctx.network.segments[segment_id].profile is ctx.profile:
             ctx.status = f"already {ctx.profile.name}"
             return True
@@ -39,7 +42,7 @@ class ProfileTool(Tool):
         return True
 
     def preview(self, ctx: EditorContext) -> ToolPreview:
-        return ToolPreview(snap=ctx.snapper.nearest_segment(ctx.cursor))
+        return ToolPreview(snap=ctx.snapper.over_segment(ctx.cursor))
 
     def hud_lines(self, ctx: EditorContext) -> list[str]:
         profile = ctx.profile

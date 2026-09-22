@@ -17,7 +17,7 @@ from roadsim.editor.snapping import Snap, SnapKind
 from roadsim.editor.tools.draw_road import DrawRoadTool, build_road_command
 from roadsim.editor.tools.move_node import MoveNodeTool
 from roadsim.editor.tools.profile import ProfileTool
-from roadsim.editor.tools.select import pick
+from roadsim.editor.pick import pick
 from roadsim.geometry import Vec2
 from roadsim.render.camera import Camera
 from roadsim.road.network import RoadNetwork
@@ -338,7 +338,7 @@ def test_preview_carries_a_ghost_with_the_junction_the_click_would_form(ctx):
     road = ctx.network.segments[1]
     s = road.path.length / 2.0
     tool._hover = Snap(SnapKind.SEGMENT, road.path.sample(s).position, (road.id, s))
-    ctx.cursor = tool._hover.attach_position
+    ctx.cursor = tool._hover.position
 
     preview = tool.preview(ctx)
 
@@ -406,7 +406,7 @@ def test_previewing_leaves_the_network_untouched(ctx):
     road = ctx.network.segments[1]
     s = road.path.length / 2.0
     tool._hover = Snap(SnapKind.SEGMENT, road.path.sample(s).position, (road.id, s))
-    ctx.cursor = tool._hover.attach_position
+    ctx.cursor = tool._hover.position
     tool.preview(ctx)
     assert dumps(ctx.network) == before
     assert not ctx.network.dirty_nodes

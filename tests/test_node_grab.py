@@ -1,10 +1,9 @@
 """Grabbing and dragging a node, at the editor layer.
 
 Moving a node is a position and nothing else (D21): one centre handle, no lane
-rings, and no connection made by where it lands. Lane handles still exist -
-`tests/test_lane_handle.py` proves the model formula, `tests/test_lane_draw.py`
-proves the tool that now uses it - but they are offered while *drawing* a road,
-not while moving a node, and this file is where that boundary is asserted.
+rings, and no connection made by where it lands. How a narrower road arranges
+itself across a wider one is the draw tool's business (D25,
+`tests/test_lane_draw.py`); this file is where that boundary is asserted.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from roadsim.editor.node_grab import grab_at
 from roadsim.editor.tools.move_node import MoveNodeTool
 from roadsim.geometry import Vec2
 from roadsim.render.camera import Camera
-from roadsim.road.lane_handle import LaneHandleKind, segment_end_handles
 from roadsim.road.network import RoadNetwork
 from roadsim.road.presets import AVENUE_FOUR_LANE, RESIDENTIAL_TWO_WAY
 
@@ -36,6 +34,12 @@ def ctx() -> EditorContext:
     return EditorContext(network, Camera(zoom=10.0, viewport=(1440, 900)))
 
 
+def _lane_point(segment, at_a: bool, lane: int) -> Vec2:
+    """Where lane `lane` of `segment` meets its `at_a` end."""
+    frame = segment.path.sample(0.0 if at_a else segment.path.length)
+    return frame.position + frame.normal * segment.profile.lane_center(lane)
+
+
 # -- node_grab.grab_at --------------------------------------------------------
 
 
@@ -47,19 +51,15 @@ def test_grab_at_a_node_takes_the_node_itself(ctx):
     assert_vec(grab.origin, node.position)
 
 
-def test_a_lane_handle_is_not_a_grab_target(ctx):
-    """A lane handle sits a lane's width off the node, well outside
-    `SNAP_NODE_PX`. Clicking one while moving takes hold of nothing at all -
-    the tool has no second thing to offer there any more (D21)."""
+def test_a_lane_centre_at_a_node_is_not_a_grab_target(ctx):
+    """A lane centre sits a lane off the node, well outside `SNAP_NODE_PX`.
+    Clicking one while moving takes hold of nothing at all - the tool has no
+    second thing to offer there (D21)."""
     seg_a = ctx.network.segments[1]
-    handle = next(
-        h
-        for h in segment_end_handles(seg_a, seg_a.node_b, False)
-        if h.kind is LaneHandleKind.LANE
-    )
-    assert handle.position.distance_to(ctx.network.nodes[seg_a.node_b].position) > 1.0
+    on_lane = _lane_point(seg_a, at_a=False, lane=0)
+    assert on_lane.distance_to(ctx.network.nodes[seg_a.node_b].position) > 1.0
 
-    assert grab_at(ctx, handle.position) is None
+    assert grab_at(ctx, on_lane) is None
 
 
 def test_grab_at_empty_space_finds_nothing(ctx):
@@ -98,16 +98,12 @@ def test_dropping_on_another_roads_lane_only_moves_the_node(ctx):
     """The behaviour D20 gave this tool and D21 took away: landing on another
     road's lane merges nothing and connects nothing."""
     seg_a, seg_b = ctx.network.segments[1], ctx.network.segments[2]
-    target_handle = next(
-        h
-        for h in segment_end_handles(seg_b, seg_b.node_a, True)
-        if h.kind is LaneHandleKind.LANE and h.index == 4
-    )
+    target = _lane_point(seg_b, at_a=True, lane=4)
     before_nodes = len(ctx.network.nodes)
 
     tool = MoveNodeTool()
     tool.grab(ctx, ctx.network.nodes[seg_a.node_b].position)
-    ctx.cursor = target_handle.position
+    ctx.cursor = target
     tool.drag_to(ctx, tool._target(ctx))
     tool.release(ctx)
     ctx.network.rebuild_dirty()

@@ -72,20 +72,18 @@ def test_selecting_a_road_changes_nothing_on_disk():
     assert dumps(network) == before
 
 
-# -- clicking with no handle under it falls through to select ---------------
+# -- clicking with no handle under it is not this tool's call (D24) -----------
 
 
-def test_a_click_with_no_handle_selects_the_road_underneath(ctx):
+def test_a_press_with_no_handle_under_it_grabs_nothing(ctx):
+    """Selecting the road underneath is `tools/edit_road.py`'s job now; this
+    tool only says whether a shape handle of the selected road was hit."""
     tool = ShapeRoadTool()
-    assert tool.press(ctx, Vec2(-40.0, -40.0))  # on the straight road, segment 2
-    assert ctx.selection == Selection(segment=2)
-
-
-def test_a_click_in_empty_space_clears_the_selection(ctx):
-    ctx.select(Selection(segment=1))
-    tool = ShapeRoadTool()
-    tool.press(ctx, Vec2(500.0, 500.0))
+    assert not tool.grab(ctx, Vec2(-40.0, -40.0))  # on segment 2, unselected
     assert ctx.selection.is_empty
+    ctx.select(Selection(segment=1))
+    assert not tool.grab(ctx, Vec2(500.0, 500.0))
+    assert ctx.selection == Selection(segment=1)
 
 
 # -- dragging a STRAIGHT_MID materialises a point, invisibly ----------------

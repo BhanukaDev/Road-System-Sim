@@ -86,7 +86,7 @@ def test_switching_modes_keeps_the_same_world(scene):
 
 def test_switching_modes_keeps_the_undo_history(scene):
     roads = to_roads(scene)
-    roads.toolbox.select(3)  # profile brush
+    roads.toolbox.select(2)  # profile brush
     scene.ctx.select_profile(ONE_WAY_TWO_LANE.name)  # painting on like for like
     roads.toolbox.active.paint(scene.ctx, Vec2(0.0, 0.1))  # records nothing
     depth = scene.ctx.history.depth
@@ -102,7 +102,7 @@ def test_leaving_mid_road_abandons_it_without_mutating_anything(scene):
     has since moved - so leaving drops them, and drops nothing else."""
     before = dumps(scene.ctx.network)
     roads = to_roads(scene)
-    roads.toolbox.select(1)  # draw
+    roads.toolbox.select(0)  # draw
     draw = roads.toolbox.active
     draw.points.extend([Vec2(0.0, 40.0), Vec2(40.0, 40.0)])
 
@@ -177,7 +177,7 @@ def test_delete_removes_the_selection_as_one_undo_step(scene):
 def test_undo_and_redo_reach_the_scene_from_any_mode(scene):
     before = dumps(scene.ctx.network)
     roads = to_roads(scene)
-    roads.toolbox.select(3)
+    roads.toolbox.select(2)  # profile brush
     scene.ctx.select_profile(ONE_WAY_TWO_LANE.name)
     roads.toolbox.active.paint(scene.ctx, Vec2(0.0, 0.1))
 

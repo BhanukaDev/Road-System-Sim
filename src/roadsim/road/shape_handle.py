@@ -58,7 +58,14 @@ class ShapeHandle:
 
 
 def shape_handles(segment: RoadSegment) -> tuple[ShapeHandle, ...]:
-    """Every handle along `segment`, sorted by arc length."""
+    """Every handle along `segment`, sorted by arc length.
+
+    None on a lane-change taper (D26): it is a straight by definition, and
+    every handle here either bends a road or moves the corner that bends it.
+    Its ends are nodes and move as nodes do.
+    """
+    if segment.is_transition:
+        return ()
     path = segment.path
     handles: list[ShapeHandle] = []
 

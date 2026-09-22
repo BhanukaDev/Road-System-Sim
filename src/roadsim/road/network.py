@@ -17,7 +17,7 @@ from itertools import count
 
 from ..geometry import Vec2
 from .cap import Cap, build_cap
-from .junction import Junction, build_junction
+from .junction import Junction, build_junction, sections_run_through
 from .node import RoadNode
 from .profile import RoadProfile
 from .segment import RoadSegment
@@ -55,11 +55,13 @@ class RoadNetwork:
         profile: RoadProfile,
         corner_radius: float | None = None,
         segment_id: int | None = None,
+        profile_b: RoadProfile | None = None,
     ) -> RoadSegment:
         """Add a segment between two existing nodes.
 
         The control points are snapped onto the nodes, because the nodes - not
-        the stroke the user drew - decide where a road ends.
+        the stroke the user drew - decide where a road ends. `profile_b` makes
+        the segment a lane-change taper from `profile` at A to it at B (D26).
         """
         for nid in (node_a, node_b):
             if nid not in self.nodes:
@@ -70,7 +72,9 @@ class RoadNetwork:
 
         segment_id = self._claim(self._segment_ids, self.segments, segment_id)
         kwargs = {} if corner_radius is None else {"corner_radius": corner_radius}
-        segment = RoadSegment(segment_id, node_a, node_b, points, profile, **kwargs)
+        segment = RoadSegment(
+            segment_id, node_a, node_b, points, profile, profile_b=profile_b, **kwargs
+        )
         self.segments[segment_id] = segment
         self.nodes[node_a].segments.add(segment_id)
         self.nodes[node_b].segments.add(segment_id)
@@ -188,6 +192,10 @@ class RoadNetwork:
         old = self.segments[segment_id]
         if not 0.0 < s < old.path.length:
             raise ValueError(f"cannot split segment {segment_id} at s={s}")
+        if old.is_transition:
+            # Its cross-section mid-way is neither of its two profiles, and a
+            # node there would have no honest section to give either half.
+            raise ValueError(f"cannot split segment {segment_id}: it is a lane change")
 
         cut = old.path.sample(s).position
         head, tail = old.control_points[0], old.control_points[-1]
@@ -244,6 +252,9 @@ class RoadNetwork:
                 segment.trim_b,
                 segment.pull_a,
                 segment.pull_b,
+                profile_b=segment.profile_b,
+                heading_a=segment.heading_a,
+                heading_b=segment.heading_b,
             )
             clone.segments[sid] = twin
         return clone
@@ -257,6 +268,41 @@ class RoadNetwork:
             if d <= best_d:
                 best, best_d = node, d
         return best
+
+    def run_length(self, segment: RoadSegment, at_a: bool, hops: int = 32) -> float:
+        """How much road runs on from `segment`'s `at_a` end, through the far
+        end and every straight through-joint of the same profile beyond it.
+
+        A junction's trim budget is a fraction of the arm's length so that a
+        stub cannot be eaten by its own junction (`JUNCTION_MAX_TRIM_FRACTION`).
+        A stub is a short *road*, not a short segment: a road cut into pieces
+        at through-joints (D24) is the same road it was, so the budget for an
+        arm is measured along the run, not the piece. Bounded by `hops` and by
+        never revisiting a segment, so a loop of joints terminates.
+        """
+        total = segment.path.length
+        seen = {segment.id}
+        current, far_at_a = segment, not at_a
+        for _ in range(hops):
+            node_id = current.node_a if far_at_a else current.node_b
+            ends = self.segments_at(node_id)
+            if len(ends) != 2:
+                break
+            other, other_at_a = next(
+                ((seg, a) for seg, a in ends if seg.id != current.id), (None, None)
+            )
+            if other is None or other.id in seen:
+                break
+            if not sections_run_through(current, far_at_a, other, other_at_a):
+                break  # the section changes: a different road starts here
+            leaving = current.outgoing_dir(far_at_a)
+            arriving = other.outgoing_dir(other_at_a)
+            if leaving.dot(arriving) > -0.999:
+                break  # a kink, not a through-joint
+            total += other.path.length
+            seen.add(other.id)
+            current, far_at_a = other, not other_at_a
+        return total
 
     def segments_at(self, node_id: int) -> list[tuple[RoadSegment, bool]]:
         """Every `(segment, at_a)` end meeting at a node. A loop counts twice."""
@@ -283,6 +329,13 @@ class RoadNetwork:
         touch. Call once per frame after commands land - never mid-command."""
         dirty, self._dirty = self._dirty, set()
         touched: set[int] = set()
+        # A taper's mouths face the roads either side of it, so their headings
+        # are read before any junction at those nodes is built from them.
+        for node_id in dirty:
+            if node_id in self.nodes:
+                for segment, at_a in self.segments_at(node_id):
+                    if segment.is_transition:
+                        self._refresh_headings(segment)
         for node_id in dirty:
             if node_id not in self.nodes:
                 self.junctions.pop(node_id, None)
@@ -295,7 +348,13 @@ class RoadNetwork:
                 self.junctions.pop(node_id, None)
             else:
                 self.caps.pop(node_id, None)
-                junction = build_junction(node_id, self.nodes[node_id].position, ends)
+                runs = {
+                    (segment.id, at_a): self.run_length(segment, at_a)
+                    for segment, at_a in ends
+                }
+                junction = build_junction(
+                    node_id, self.nodes[node_id].position, ends, runs
+                )
                 if junction is None:
                     self.junctions.pop(node_id, None)
                 else:
@@ -307,6 +366,39 @@ class RoadNetwork:
     def rebuild_all(self) -> None:
         self._dirty.update(self.nodes)
         self.rebuild_dirty()
+
+    def _refresh_headings(self, taper: RoadSegment) -> None:
+        """Point each of a taper's mouths the way the one road beyond it runs
+        (D28).
+
+        A mouth with no single ordinary road beyond it - at a junction of
+        several arms, where a branch begins - faces the way the taper's other
+        mouth faces: the road beyond that end is a parallel offset of the line
+        the branch was drawn along, so the two mouths are parallel by
+        construction, and this is the heading the arrangement at the junction
+        was measured in. With neither mouth resolvable (a taper left dangling
+        at both ends) the chord is the only heading it has of its own.
+        """
+        headings: list[Vec2 | None] = []
+        for at_a in (True, False):
+            node_id = taper.node_a if at_a else taper.node_b
+            others = [
+                (seg, seg_at_a)
+                for seg, seg_at_a in self.segments_at(node_id)
+                if seg.id != taper.id
+            ]
+            heading: Vec2 | None = None
+            if len(others) == 1 and not others[0][0].is_transition:
+                other, other_at_a = others[0]
+                away = other.outgoing_dir(other_at_a)  # along the other road, off the node
+                # In the taper's A -> B sense: leaving the node into the taper
+                # at A means coming *from* the other road; arriving at B means
+                # going on *into* it.
+                heading = -away if at_a else away
+            headings.append(heading)
+        heading_a, heading_b = headings
+        taper.heading_a = heading_a if heading_a is not None else heading_b
+        taper.heading_b = heading_b if heading_b is not None else heading_a
 
     def _retrim(self, segment: RoadSegment) -> None:
         segment.trim_a = self._trim_at(segment, True)

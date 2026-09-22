@@ -188,20 +188,55 @@ Landed so far:
   geometry); before a first point the profile's width follows the cursor as a
   footprint disc.
 
-- **A lane can be joined anywhere along a road, and roads run alongside each
-  other (D23).** `road/lane_handle.py` builds a handle at any station, not only
-  at a node; hovering a road in the **draw** tool shows its lanes at the cursor's
-  station and always names the nearest lane line. Clicking one splits the road
-  there and joins the new node by that lane, one undo step, with the datum
-  solved as at a node. The footprint disc moves to where the shifted road's
-  *body* will be instead of sitting on the centreline. `SnapKind.BESIDE` pulls a
-  free point sideways so the road being placed runs parallel to a neighbour,
+- **Roads run alongside each other (D23).** `SnapKind.BESIDE` pulls a free
+  point sideways so the road being placed runs parallel to a neighbour,
   `config.BESIDE_GAP` between the kerbs - an alignment aid, like an anchor,
   offered to both the draw tool (with the profile the road will actually be
-  built with) and the move tool (with the dragged node's own roads). Kerb
+  built with) and the edit tool (with the dragged node's own roads). Kerb
   beside kerb only, never lane on lane: that would put two carriageways through
   each other. The verge is not zero because a joined ramp touching its road
-  shares a kerb line and leaves the junction no gore to resolve.
+  shares a kerb line and leaves the junction no gore to resolve. (D23 also
+  introduced lane handles along a road; D25 replaced them.)
+- **Three tools: draw, edit, profile (D24).** `tools/edit_road.py` composes
+  the node drag and the shape drag and decides by what the press lands on; the
+  select tool is gone. Hover highlighting and click-to-select live in
+  `Toolbox` for every tool, and picking (`editor/pick.py`) hits a road anywhere
+  over its carriageway. A long stroke is cut into pieces at
+  `config.AUTO_NODE_SPACING` along its straights, never through a fillet, so a
+  stretch of a long road can be selected or deleted alone; Ctrl+click in the
+  draw tool cuts a road by hand. A junction's trim budget follows the *run* of
+  through-joints (`RoadNetwork.run_length`), so cutting a road does not shrink
+  the gores on it.
+- **A narrower road is arranged across a wider one by where the cursor is
+  (D25).** No lane handles: the first click across a road of another width
+  records an `Attachment`, the cursor's lateral position while placing the
+  second point picks the nearest *arrangement* (offsets where a lane line of
+  one road lies on a lane line of the other, kerb-hugging extremes included),
+  the second click locks it, and the datum is solved in the new road's own end
+  frame - exact along the tangent, zero square on. Equal widths simply centre.
+  The road snap is the whole carriageway (`Snapper.snap(over_body=True)`).
+- **A lane change is a straight segment between two nodes (D26).**
+  `RoadSegment.profile_b` makes a taper: one section at A, another at B, edges
+  straight between them, painted as a patch by `build_taper`. Continuing a road
+  of another width from its dead end puts one down first, `TRANSITION_TAPER_RATE`
+  metres per metre of width change, and the road proper starts at a node beyond
+  it; a branch mid-road owes none. Every end-reading consumer uses
+  `profile_at(at_a)`; through joints compare sections *physically*
+  (`sections_run_through`), so a head-to-head asymmetric join is a lane change.
+  Save files are version 2; version 1 loads.
+- **A road is centred on its own nodes (D28).** The arrangement no longer
+  shifts the road's datum: the road's centreline is the drawn line offset by
+  the arrangement, so every node sits in the middle of its road, and the
+  lateral step to the attach node is a taper - a width change at a dead end, or
+  a *slide* (same lanes, centred elsewhere) at a branch, drawn as plain road.
+  Taper mouths face the roads beyond them (`heading_a/heading_b`, derived at
+  rebuild), and a taper's kerb is the line between its mouths' edges.
+- **Lane lines pair by direction of travel (D27).** `road/transition.py` reads
+  each profile as forward and backward groups ordered from the seam outward and
+  pairs forward with forward, backward with backward, line for line. A one-way
+  road's lone group faces where the other direction would be, by handedness. A
+  direction with no counterpart runs its lines to the kerb and gets a U-turn
+  decal (`decal.SYNTHESISED["arrow_u_turn"]`) on every lane.
 
 Still to come: shapers (straight / curve / freeform / continuous), loops,
 bulldoze and replace; levels, colliders and crossings; then exact junction trims,
@@ -211,5 +246,5 @@ rounded corners, the corner handle and pavements.
 showcase - which now includes a shallow gore and a lane taper - and
 `--scene debug` M1's geometry surface.
 
-See `docs/decisions.md` for why things are the way they are - D9 to D23 are this
+See `docs/decisions.md` for why things are the way they are - D9 to D28 are this
 milestone's.

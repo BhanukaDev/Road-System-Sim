@@ -50,7 +50,7 @@ def build_cap(segment: RoadSegment, at_a: bool) -> Cap:
     node_id = segment.node_a if at_a else segment.node_b
     frame = segment.end_frame(at_a)
     normal = frame.normal
-    profile = segment.profile
+    profile = segment.profile_at(at_a)
     left = frame.position + normal * profile.edges[0]
     right = frame.position + normal * profile.edges[-1]
 

@@ -23,7 +23,10 @@ from ..road.lane import Direction, LaneSpec, LaneType
 from ..road.network import RoadNetwork
 from ..road.profile import RoadProfile
 
-VERSION = 1
+VERSION = 2
+"""Version 2 added the optional `profile_b` key on a segment - a lane-change
+taper (D26). A version 1 file has none and loads unchanged."""
+READABLE = (1, 2)
 
 
 class SchemaError(ValueError):
@@ -35,6 +38,9 @@ class SchemaError(ValueError):
 
 def network_to_dict(network: RoadNetwork) -> dict[str, Any]:
     profiles = {seg.profile.name: seg.profile for seg in network.segments.values()}
+    for seg in network.segments.values():
+        if seg.profile_b is not None:
+            profiles[seg.profile_b.name] = seg.profile_b
     return {
         "version": VERSION,
         "profiles": {
@@ -54,6 +60,11 @@ def network_to_dict(network: RoadNetwork) -> dict[str, Any]:
                 "points": [[p.x, p.y] for p in seg.control_points],
                 **({"pull_a": seg.pull_a} if seg.pull_a is not None else {}),
                 **({"pull_b": seg.pull_b} if seg.pull_b is not None else {}),
+                **(
+                    {"profile_b": seg.profile_b.name}
+                    if seg.profile_b is not None
+                    else {}
+                ),
             }
             for sid, seg in sorted(network.segments.items())
         ],
@@ -80,9 +91,9 @@ def profile_to_dict(profile: RoadProfile) -> dict[str, Any]:
 
 def network_from_dict(payload: dict[str, Any]) -> RoadNetwork:
     version = payload.get("version")
-    if version != VERSION:
+    if version not in READABLE:
         raise SchemaError(
-            f"unsupported save version {version!r}; this build reads version {VERSION}"
+            f"unsupported save version {version!r}; this build reads versions {READABLE}"
         )
 
     profiles = {
@@ -97,6 +108,11 @@ def network_from_dict(payload: dict[str, Any]) -> RoadNetwork:
         name = seg["profile"]
         if name not in profiles:
             raise SchemaError(f"segment {seg['id']} uses undeclared profile {name!r}")
+        name_b = seg.get("profile_b")
+        if name_b is not None and name_b not in profiles:
+            raise SchemaError(
+                f"segment {seg['id']} tapers to undeclared profile {name_b!r}"
+            )
         added = network.add_segment(
             seg["a"],
             seg["b"],
@@ -104,6 +120,7 @@ def network_from_dict(payload: dict[str, Any]) -> RoadNetwork:
             profiles[name],
             corner_radius=float(seg["radius"]),
             segment_id=seg["id"],
+            profile_b=None if name_b is None else profiles[name_b],
         )
         if "pull_a" in seg:
             added.pull_a = float(seg["pull_a"])

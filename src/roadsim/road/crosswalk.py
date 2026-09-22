@@ -52,7 +52,8 @@ def crosswalk_mark(segment: RoadSegment, at_a: bool) -> CrosswalkMark | None:
     """`None` when the profile is all sidewalk or the carriageway is too short
     to fit both the stripes and the stop line's setback - the same "flag it,
     don't crash" discipline as `is_too_short`."""
-    left, right = _paved_extent(segment.profile)
+    profile = segment.profile_at(at_a)
+    left, right = _paved_extent(profile)
     if left <= right:
         return None
 
@@ -69,7 +70,7 @@ def crosswalk_mark(segment: RoadSegment, at_a: bool) -> CrosswalkMark | None:
         s1 = segment.path.length - segment.trim_b
         stripes = (s1 - depth, s1)
         stop_s = s1 - depth - setback
-    stop_left, stop_right = _approach_extent(segment.profile, at_a)
+    stop_left, stop_right = _approach_extent(profile, at_a)
     return CrosswalkMark(left, right, *stripes, stop_s, stop_left, stop_right)
 
 
